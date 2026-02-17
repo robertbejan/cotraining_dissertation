@@ -59,7 +59,7 @@ class ExperimentConfig:
         # Fixed parameters
         self.input_size = (227, 227)
         self.batch_size = 30
-        self.num_epochs = 20
+        self.num_epochs = 60
         self.learning_rate = 1e-4
         self.k = 200
         self.checked_number = 200
@@ -68,12 +68,12 @@ class ExperimentConfig:
         # Dataset mapping
         dataset_map = {
             # "small_80": {
-                # "base": "small_labeled_ultrasound_dataset",
-                # "unlabeled_pct": 80
+            #     "base": "small_labeled_ultrasound_dataset",
+            #     "unlabeled_pct": 80
             # }
             # "organized_50": {
-                # "base": "organized_ultrasound_dataset",
-                # "unlabeled_pct": 50
+            #     "base": "organized_labeled_ultrasound_dataset",
+            #     "unlabeled_pct": 50
             # },
             "large_20": {
                 "base": "large_labeled_ultrasound_dataset",
@@ -174,6 +174,14 @@ def run_experiment(config):
     optimizer_rgb = optim.Adam(model_rgb.parameters(), lr=config.learning_rate)
     optimizer_fft = optim.Adam(model_fft.parameters(), lr=config.learning_rate)
 
+    # NEW - Initialize the LR schedulers - NEW
+    cotrainer.init_schedulers(
+        optimizer_rgb,
+        optimizer_fft,
+        step_size=5,
+        gamma=0.9
+    )
+
     # Training loop
     print("Starting co-training...")
     for epoch in range(config.num_epochs):
@@ -212,8 +220,8 @@ def run_experiment(config):
 
     # Save models
     os.makedirs("models", exist_ok=True)
-    model_rgb_path = f"models/{config.experiment_id}_rgb.pth"
-    model_fft_path = f"models/{config.experiment_id}_fft.pth"
+    model_rgb_path = f"models/{config.experiment_id}_rgb2.pth"
+    model_fft_path = f"models/{config.experiment_id}_fft2.pth"
     torch.save(model_rgb.state_dict(), model_rgb_path)
     torch.save(model_fft.state_dict(), model_fft_path)
     print(f"Models saved: {model_rgb_path}, {model_fft_path}")
@@ -279,11 +287,11 @@ def run_all_experiments():
     """Run all experiment combinations"""
     datasets = ["large_20"]
     # datasets = ["small_80", "organized_50", "large_20"]
-    cotraining_starts = [5, 7, 10]
+    cotraining_starts = [5] #, 7, 10]
     threshold_configs = [
         {"rgb": 0.95, "fft": 0.90},  # High thresholds
-        {"rgb": 0.90, "fft": 0.85},  # Medium thresholds
-        {"rgb": 0.85, "fft": 0.80}  # Lower thresholds
+        # {"rgb": 0.90, "fft": 0.85},  # Medium thresholds
+        # {"rgb": 0.85, "fft": 0.80}  # Lower thresholds
     ]
 
     all_results = []

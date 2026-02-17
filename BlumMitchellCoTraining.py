@@ -3,12 +3,15 @@ import torch.nn as nn
 from sklearn.metrics import accuracy_score, confusion_matrix
 import random
 import torch.fft
+from torch.optim.lr_scheduler import StepLR
 
 
 class BlumMitchellCoTraining:
     def __init__(self, model_rgb, model_fft, num_classes, device, checked_number, cotraining_start, k=30,
                  confidence_thresh_fft=0.95,
                  confidence_thresh_rgb=0.9):
+        self.scheduler_rgb = None
+        self.scheduler_fft = None
         self.model_rgb = model_rgb
         self.model_fft = model_fft
         self.num_classes = num_classes
@@ -37,6 +40,12 @@ class BlumMitchellCoTraining:
         self.rgb_dataset = rgb_dataset
         self.fft_dataset = fft_dataset
         self.unlabeled_dataset = unlabeled_dataset
+
+    def init_schedulers(self, optimizer_rgb, optimizer_fft, step_size=5, gamma=0.9):
+        """Initializes the StepLR schedulers for both optimizers."""
+        self.scheduler_rgb = StepLR(optimizer_rgb, step_size=step_size, gamma=gamma)
+        self.scheduler_fft = StepLR(optimizer_fft, step_size=step_size, gamma=gamma)
+        print(f"Initialized StepLR schedulers: step_size={step_size}, gamma={gamma}")
 
     def train_iteration(self, rgb_loader, fft_loader, unlabeled_loader, optimizer_rgb, optimizer_fft, epoch_counter,
                         batch_size, reevaluate_flag):
@@ -82,6 +91,11 @@ class BlumMitchellCoTraining:
             if rgb_added == 0 and fft_added == 0:
                 print("No new pseudo-labeled samples added (all were duplicates)")
 
+        if hasattr(self, 'scheduler_rgb'):
+            self.scheduler_rgb.step()
+            self.scheduler_fft.step()
+            print(
+                f"LR updated. RGB LR: {self.scheduler_rgb.get_last_lr()[0]:.6f}, FFT LR: {self.scheduler_fft.get_last_lr()[0]:.6f}")
         # 4. Evaluate
         # return self.evaluate(labeled_loader)
 
@@ -96,6 +110,9 @@ class BlumMitchellCoTraining:
         self.model_rgb.train()
         self.model_fft.train()
 
+        total_loss_rgb = 0.0
+        total_loss_fft = 0.0
+
         for rgb_inputs, fft_inputs, labels in rgb_loader:
             rgb_inputs, fft_inputs, labels = rgb_inputs.to(self.device), fft_inputs.to(self.device), labels.to(
                 self.device)
@@ -107,6 +124,8 @@ class BlumMitchellCoTraining:
             loss_rgb.backward()
             optimizer_rgb.step()
 
+            total_loss_rgb += loss_rgb.item() * rgb_inputs.size(0)
+
         for rgb_inputs, fft_inputs, labels in fft_loader:
             rgb_inputs, fft_inputs, labels = rgb_inputs.to(self.device), fft_inputs.to(self.device), labels.to(
                 self.device)
@@ -117,6 +136,12 @@ class BlumMitchellCoTraining:
             loss_fft = self.criterion(fft_outputs, labels)
             loss_fft.backward()
             optimizer_fft.step()
+
+        total_loss_fft += loss_fft.item() * fft_inputs.size(0)
+
+        num_samples = len(rgb_loader.dataset) + len(fft_loader.dataset)
+        avg_total_loss = (total_loss_rgb + total_loss_fft) / num_samples if num_samples > 0 else 0.0
+        print(f"The average loss on this epoch is: {avg_total_loss}")
 
     def label_unlabeled_data(self, unlabeled_loader, cotraining_start, epoch_counter, batch_size):
         """
@@ -239,26 +264,22 @@ class BlumMitchellCoTraining:
         rgb_removal_rate = rgb_removed / batch_size
         fft_removal_rate = fft_removed / batch_size
 
-        if rgb_removal_rate > 0.5:
-            self.confidence_thresh_rgb = self.confidence_thresh_rgb * 0.95
-        elif rgb_removal_rate > 0.3:
-            self.confidence_thresh_rgb = self.confidence_thresh_rgb * 0.97
-        elif rgb_removal_rate > 0.1:
-            self.confidence_thresh_rgb = self.confidence_thresh_rgb * 0.99
+        if rgb_removal_rate <= 0.3:
+            self.confidence_thresh_rgb = self.confidence_thresh_rgb * 1.03
+        elif rgb_removal_rate <= 0.55:
+            self.confidence_thresh_rgb = self.confidence_thresh_rgb * 1.01
         else:
-            pass
+            self.confidence_thresh_rgb = self.confidence_thresh_rgb * 0.96
 
-        if fft_removal_rate > 0.5:
-            self.confidence_thresh_fft = self.confidence_thresh_fft * 0.95
-        elif fft_removal_rate > 0.3:
-            self.confidence_thresh_fft = self.confidence_thresh_fft * 0.97
-        elif fft_removal_rate > 0.1:
-            self.confidence_thresh_fft = self.confidence_thresh_fft * 0.99
+        if fft_removal_rate <= 0.3:
+            self.confidence_thresh_fft = self.confidence_thresh_fft * 1.03
+        elif fft_removal_rate <= 0.55:
+            self.confidence_thresh_fft = self.confidence_thresh_fft * 1.01
         else:
-            pass
+            self.confidence_thresh_fft = self.confidence_thresh_fft * 0.96
 
-        self.confidence_thresh_rgb = max(self.confidence_thresh_rgb, 0.75)
-        self.confidence_thresh_fft = max(self.confidence_thresh_fft, 0.70)
+        self.confidence_thresh_rgb = min(max(self.confidence_thresh_rgb, 0.75), 1.0)
+        self.confidence_thresh_fft = min(max(self.confidence_thresh_fft, 0.70), 1.0)
 
         print(f"The removal rate for RGB dataset: {rgb_removal_rate}")
         print(f"The removal rate for FFT dataset: {fft_removal_rate}")

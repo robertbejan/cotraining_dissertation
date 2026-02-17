@@ -25,29 +25,29 @@ results = []
 print('Program starting...')
 input_size = (227, 227)
 batch_size = 30
-num_epochs = 20
+num_epochs = 60
 learning_rate = 1e-4
 
 # Paths
 save_model_paths = [
-    "../../mainProject/pythonProject1/rezCNNsqueezenetFilteredOrganized.pth",
+    # "../../mainProject/pythonProject1/rezCNNsqueezenetFilteredOrganized.pth",
     "../../mainProject/pythonProject1/rezCNNsqueezenetFilteredLarge.pth",
     "../../mainProject/pythonProject1/rezCNNsqueezenetFilteredSmall.pth"
 ]
 
 train_paths = [
-    "D:/Facultate/Disertatie/mainProject/pythonProject1/organized_ultrasound_dataset/labeled_train",
+    # "D:/Facultate/Disertatie/mainProject/pythonProject1/organized_labeled_ultrasound_dataset/labeled_train",
     "D:/Facultate/Disertatie/mainProject/pythonProject1/large_labeled_ultrasound_dataset/labeled_train",
     "D:/Facultate/Disertatie/mainProject/pythonProject1/small_labeled_ultrasound_dataset/labeled_train"
 ]
 
 test_paths = [
-    "D:/Facultate/Disertatie/mainProject/pythonProject1/organized_ultrasound_dataset/test",
+    # "D:/Facultate/Disertatie/mainProject/pythonProject1/organized_labeled_ultrasound_dataset/test",
     "D:/Facultate/Disertatie/mainProject/pythonProject1/large_labeled_ultrasound_dataset/test",
     "D:/Facultate/Disertatie/mainProject/pythonProject1/small_labeled_ultrasound_dataset/test"
 ]
 
-exp_labels = ["50% labeled", "80% labeled", "20% labeled"]
+exp_labels = ["80% labeled", "20% labeled"]
 
 
 for i in range(3):

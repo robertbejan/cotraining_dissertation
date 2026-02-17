@@ -1,54 +1,92 @@
 import csv
-import re
 import pandas as pd
+from io import StringIO
 
+# The content of your file as a string
 file_content = """
-experiment_id,dataset,unlabeled_pct,cotraining_start,conf_rgb,conf_fft,test_rgb_acc,test_fft_acc,test_combined_acc,rgb_confusion_matrix,fft_confusion_matrix,combined_confusion_matrix,num_classes,final_rgb_size,final_fft_size,unlabeled_used,rgb_pseudo_samples,fft_pseudo_samples,timestamp
-small_80_start5_rgb0.95_fft0.9,small_80,80,5,0.95,0.9,0.8637096774193549,0.6911290322580645,0.8274193548387097,"68,48,0,0,20,6,1,615,1,0,1,0,0,18,171,0,19,0,0,1,0,324,0,0,8,81,44,5,685,20,1,28,2,1,33,279","0,109,0,10,12,11,0,603,0,5,4,6,0,121,64,1,21,1,0,1,0,323,0,1,1,272,11,36,483,40,0,87,1,9,6,241","50,70,0,1,12,9,0,618,0,0,0,0,0,47,145,1,14,1,0,1,0,324,0,0,6,139,24,12,635,27,1,45,0,7,11,280",6,4423,4327,5511,2738,2642,2025-11-11 22:36:35
-small_80_start5_rgb0.9_fft0.85,small_80,80,5,0.9,0.85,0.8,0.7048387096774194,0.7883064516129032,"36,83,0,0,21,2,0,616,0,0,2,0,0,79,105,0,24,0,0,4,0,321,0,0,3,132,14,5,666,23,0,87,0,0,17,240","7,99,0,1,28,7,3,584,0,1,29,1,1,87,22,0,97,1,0,4,0,318,3,0,9,184,3,8,610,29,8,87,0,0,42,207","21,94,0,0,26,1,0,616,0,0,2,0,0,83,77,0,48,0,0,3,0,322,0,0,2,132,4,5,672,28,0,81,0,1,15,247",6,4478,4420,5505,2793,2735,2025-11-12 00:03:24
-small_80_start5_rgb0.85_fft0.8,small_80,80,5,0.85,0.8,0.8681451612903226,0.7358870967741935,0.8443548387096774,"123,7,0,0,8,4,2,609,0,0,4,3,0,69,125,0,14,0,0,1,0,324,0,0,24,66,19,8,698,28,19,35,0,0,16,274","0,86,1,0,31,24,0,583,0,0,29,6,0,91,70,0,39,8,0,6,0,315,3,1,1,192,9,5,594,42,0,60,0,0,21,263","104,18,0,0,12,8,0,607,0,0,10,1,0,83,104,0,19,2,0,1,0,324,0,0,15,100,10,7,679,32,13,43,0,0,12,276",6,4504,4449,5599,2819,2764,2025-11-12 01:31:09
-small_80_start7_rgb0.95_fft0.9,small_80,80,7,0.95,0.9,0.8794354838709677,0.7169354838709677,0.8653225806451613,"118,7,0,0,17,0,0,598,0,0,20,0,0,14,141,0,53,0,0,0,0,324,1,0,16,30,25,7,749,16,4,30,0,1,58,251","8,68,0,0,33,33,2,545,0,0,58,13,0,84,49,0,64,11,1,1,0,318,4,1,19,139,6,3,615,61,2,55,1,0,43,243","107,11,0,0,21,3,0,596,0,0,22,0,0,30,120,0,58,0,0,0,0,324,1,0,12,53,18,5,736,19,2,34,0,0,45,263",6,4129,3973,4803,2444,2288,2025-11-12 02:50:41
-small_80_start7_rgb0.9_fft0.85,small_80,80,7,0.9,0.85,0.9056451612903226,0.6939516129032258,0.8778225806451613,"112,11,0,0,14,5,1,616,0,0,0,1,0,2,196,0,9,1,1,0,0,324,0,0,17,41,61,5,688,31,1,20,0,1,12,310","0,111,0,0,28,3,0,599,0,0,19,0,0,135,29,0,44,0,0,5,0,320,0,0,0,230,3,5,580,25,2,106,0,0,43,193","99,29,0,0,13,1,0,616,0,0,2,0,0,33,165,0,10,0,0,2,0,323,0,0,10,83,34,4,684,28,1,37,0,1,15,290",6,4141,4085,4911,2456,2400,2025-11-12 04:10:30
-small_80_start7_rgb0.85_fft0.8,small_80,80,7,0.85,0.8,0.8536290322580645,0.7225806451612903,0.847983870967742,"94,25,0,0,11,12,1,614,0,0,2,1,0,46,144,0,17,1,0,1,0,324,0,0,13,116,23,4,670,17,0,46,0,0,27,271","7,38,1,0,48,48,5,533,0,3,56,21,3,61,46,0,83,15,0,1,0,323,0,1,15,98,6,12,653,59,4,29,1,3,77,230","86,23,0,0,15,18,0,612,0,1,5,0,0,51,126,0,29,2,0,1,0,324,0,0,9,108,13,4,688,21,0,37,0,0,40,267",6,4143,4034,4845,2458,2349,2025-11-12 05:31:02
-small_80_start10_rgb0.95_fft0.9,small_80,80,10,0.95,0.9,0.9108870967741935,0.7290322580645161,0.8923387096774194,"119,1,0,0,6,16,3,604,0,0,3,8,1,1,186,0,20,0,1,0,0,324,0,0,33,11,46,4,695,54,4,2,0,0,7,331","2,88,0,2,18,32,0,595,1,2,16,4,0,81,95,1,24,7,0,2,0,322,0,1,0,208,33,12,533,57,0,65,0,4,14,261","103,14,0,0,7,18,0,611,0,1,1,5,1,24,169,0,14,0,0,1,0,324,0,0,20,57,35,4,682,45,3,12,0,1,4,324",6,3558,3575,3659,1873,1890,2025-11-12 06:39:43
-small_80_start10_rgb0.9_fft0.85,small_80,80,10,0.9,0.85,0.8689516129032258,0.7233870967741935,0.8737903225806452,"67,0,0,0,73,2,0,587,2,0,25,4,0,0,165,0,43,0,1,0,0,317,7,0,5,5,28,2,791,12,2,3,0,0,111,228","4,64,0,4,44,26,0,543,1,4,63,7,0,75,41,1,85,6,1,1,0,321,2,0,8,116,4,16,663,36,1,56,0,4,61,222","63,0,0,0,76,3,0,591,1,1,25,0,0,7,150,0,51,0,0,0,0,322,3,0,3,11,22,2,791,14,1,4,0,1,88,250",6,3583,3475,3614,1898,1790,2025-11-12 07:48:45
-small_80_start10_rgb0.85_fft0.8,small_80,80,10,0.85,0.8,0.907258064516129,0.725,0.8959677419354839,"114,2,0,0,10,16,2,611,0,0,2,3,0,9,163,0,36,0,1,0,0,324,0,0,21,28,36,6,720,32,2,10,1,0,13,318","3,73,0,0,48,18,0,555,3,2,51,7,0,68,57,0,75,8,0,3,0,322,0,0,1,141,7,5,660,29,1,61,1,1,79,201","104,7,0,0,18,13,0,614,0,0,3,1,0,25,139,0,44,0,1,0,0,324,0,0,18,38,28,4,728,27,1,11,1,0,18,313",6,3580,3526,3624,1895,1841,2025-11-12 09:01:17"""
+small_80_start5_rgb0.95_fft0.9,small_80,80,5,0.95,0.9,0.8685483870967742,0.7931451612903225,0.8612903225806452,"65,29,0,0,29,19,0,612,0,0,5,1,0,27,155,0,25,1,0,1,0,324,0,0,7,72,33,5,692,34,1,17,1,0,19,306","8,42,1,1,32,58,2,555,0,1,40,20,4,36,115,0,28,25,0,1,0,322,1,1,20,75,19,5,645,79,0,10,1,1,10,322","55,30,0,0,31,26,0,610,0,0,7,1,0,25,156,0,24,3,0,1,0,324,0,0,10,76,30,6,681,40,0,18,1,0,15,310",6,3465,4401,7371,2172,3108,2025-12-12 00:25:50
+organized_50_start5_rgb0.95_fft0.9,organized_50,50,5,0.95,0.9,0.9306451612903226,0.8282258064516129,0.930241935483871,"118,3,0,0,17,4,2,612,0,0,3,1,0,2,165,0,41,0,1,0,0,321,3,0,14,15,18,3,769,24,1,3,0,0,17,323","64,31,2,0,30,15,10,580,2,0,21,5,10,26,141,0,26,5,0,0,1,319,4,1,49,66,29,4,663,32,29,14,1,0,13,287","120,4,0,0,15,3,1,613,0,0,4,0,0,5,165,0,38,0,1,0,0,322,2,0,14,18,20,3,760,28,1,3,0,0,13,327",6,5548,6097,4866,1333,1882,2025-12-12 21:38:42
+large_20_start5_rgb0.95_fft0.9,large_20,20,5,0.95,0.9,0.9403225806451613,0.8302419354838709,0.9439516129032258,"127,1,1,0,10,3,1,614,1,0,2,0,0,0,191,0,17,0,1,0,0,322,2,0,11,11,42,1,756,22,0,2,0,0,20,322","46,16,2,0,65,13,11,533,8,1,63,2,1,9,152,0,44,2,1,0,0,321,3,0,24,21,28,3,742,25,11,3,4,0,61,265","124,1,0,0,13,4,0,614,1,0,3,0,0,0,191,0,17,0,1,0,0,323,1,0,11,12,35,1,764,20,0,2,0,0,17,325",6,7074,6929,1946,330,185,2025-12-14 19:45:50
+"""
 
+# --- Helper Function ---
 ## Function to convert a flat list of 36 ints into a matrix string
 def make_matrix_string(values):
-    values = list(map(int, values.split(",")))
-    assert len(values) == 36, "Confusion matrix must have exactly 36 values."
-    rows = []
-    for i in range(6):
-        row_vals = values[i*6:(i+1)*6]
-        row_str = " ".join(f"{v:4d}" for v in row_vals)
-        rows.append(row_str)
-    return "\n" + "\n".join(rows) + "\n"
+    """Converts a comma-separated string of 36 integers into a 6x6 formatted matrix string."""
+    try:
+        # Check if values is a string and convert to a list of ints
+        if isinstance(values, str):
+            value_list = list(map(int, values.split(",")))
+        # If it's already a list (in case it was pre-processed), use it directly
+        elif isinstance(values, list):
+            value_list = list(map(int, values))
+        else:
+            raise ValueError("Input must be a string of comma-separated integers.")
 
-# Split header from data
-cleaned = " ".join(file_content.split())
-header, *rest = cleaned.split(" ", 1)
-header = header.split(",")
+        assert len(value_list) == 36, f"Confusion matrix must have exactly 36 values, but got {len(value_list)}."
+        rows = []
+        for i in range(6):
+            row_vals = value_list[i * 6:(i + 1) * 6]
+            # Use f-string formatting to ensure each number takes 4 characters (e.g., '  65')
+            row_str = " ".join(f"{v:4d}" for v in row_vals)
+            rows.append(row_str)
+        return "\n" + "\n".join(rows) + "\n"
+    except Exception as e:
+        # Handle cases where the input is malformed, returning the original string/value
+        print(f"Error processing matrix: {e}. Returning original value.")
+        return str(values)
 
-# Split at every experiment start
-rows_raw = re.split(r"\s+(?=small_80_start)", rest[0])
 
-rows = []
-for r in rows_raw:
-    r = r.strip()
-    if not r:
+# --- MODIFIED LOGIC ---
+
+# 1. Define Column Headers
+# The sample data has 18 columns in total (9 standard + 3 quoted matrices + 6 standard).
+# I'll provide descriptive names for the columns based on their presumed content.
+header = [
+    'full_name', 'name_part1', 'name_part2', 'start', 'rgb', 'fft',
+    'metric1', 'metric2', 'metric3',
+    'matrix_str_1', 'matrix_str_2', 'matrix_str_3',
+    'val1', 'val2', 'val3', 'val4', 'val5', 'val6', # <--- ADDED 'val6'
+    'timestamp'
+]
+
+# Indices of the columns containing the confusion matrix strings (0-indexed)
+# Based on the sample, these are columns 9, 10, and 11.
+MATRIX_INDICES = [9, 10, 11]
+
+# 2. Use StringIO to treat the string content as a file and csv.reader to parse
+# This correctly handles the quoted fields.
+file_stream = StringIO(file_content.strip())
+reader = csv.reader(file_stream)
+
+processed_rows = []
+
+for parsed_row in reader:
+    # Basic check for column count consistency
+    if len(parsed_row) != len(header):
+        print(f"Skipping row: Expected {len(header)} columns, but found {len(parsed_row)}.")
         continue
-    reader = csv.reader([r])
-    parsed = next(reader)
 
-    # Convert the 3 confusion matrix columns
-    for idx, colname in enumerate(header):
-        if "confusion_matrix" in colname:
-            parsed[idx] = make_matrix_string(parsed[idx])
+    current_row = list(parsed_row)
 
-    rows.append(parsed)
+    # Convert the confusion matrix columns
+    for idx in MATRIX_INDICES:
+        # The csv.reader already strips quotes, so we just check if the content is a string
+        if isinstance(current_row[idx], str):
+            current_row[idx] = make_matrix_string(current_row[idx])
 
-df = pd.DataFrame(rows, columns=header)
+    processed_rows.append(current_row)
 
-df.to_excel("output.xlsx", index=False)
-print("output.xlsx generated.")
+# 3. Create the DataFrame and export
+if processed_rows:
+    df = pd.DataFrame(processed_rows, columns=header)
+
+    # Print the DataFrame to verify the matrix formatting (optional)
+    # print(df[['name_part1', 'matrix_str_1']].head())
+
+    # Export to Excel
+    df.to_excel("output80_GOOD.xlsx", index=False)
+    print("\n✅ output80_GOOD.xlsx generated successfully.")
+    print(f"Dataframe shape: {df.shape}")
+else:
+    print("❌ No valid data found to create DataFrame.")
