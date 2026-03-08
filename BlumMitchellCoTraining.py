@@ -71,25 +71,30 @@ class BlumMitchellCoTraining:
                 rgb_removed, fft_removed = self.reevaluate_pseudo_labels(self.checked_number)
                 self.adjust_confidence_threshold(rgb_removed, fft_removed, self.checked_number)
 
-            rgb_confident_samples, fft_confident_samples = self.label_unlabeled_data(unlabeled_loader,
-                                                                                     self.cotraining_start,
-                                                                                     epoch_counter, batch_size)
-
             # RGB model's confident predictions go to FFT dataset
-            rgb_added = 0
-            if rgb_confident_samples:
-                rgb_added = self.fft_dataset.add_pseudo_samples(rgb_confident_samples)
-                if rgb_added > 0:
-                    print(f"Added {rgb_added} new RGB-labeled samples to FFT dataset")
-            # FFT model's confident predictions go to RGB dataset
-            fft_added = 0
-            if fft_confident_samples:
-                fft_added = self.rgb_dataset.add_pseudo_samples(fft_confident_samples)
-                if fft_added > 0:
-                    print(f"Added {fft_added} new FFT-labeled samples to RGB dataset")
+            # rgb_added = 0
+            # if rgb_confident_samples:
+            #     rgb_added = self.fft_dataset.add_pseudo_samples(rgb_confident_samples)
+            #     if rgb_added > 0:
+            #         print(f"Added {rgb_added} new RGB-labeled samples to FFT dataset")
+            # # FFT model's confident predictions go to RGB dataset
+            # fft_added = 0
+            # if fft_confident_samples:
+            #     fft_added = self.rgb_dataset.add_pseudo_samples(fft_confident_samples)
+            #     if fft_added > 0:
+            #         print(f"Added {fft_added} new FFT-labeled samples to RGB dataset")
+            #
+            # if rgb_added == 0 and fft_added == 0:
+            #     print("No new pseudo-labeled samples added (all were duplicates)")
 
-            if rgb_added == 0 and fft_added == 0:
-                print("No new pseudo-labeled samples added (all were duplicates)")
+            rgb_cons, fft_cons = self.label_unlabeled_data(unlabeled_loader)
+
+            if rgb_cons:
+                # Add the same samples to both. This forces both models to
+                # agree on the same 'ground truth' for the next epoch.
+                added_rgb = self.rgb_dataset.add_pseudo_samples(rgb_cons)
+                added_fft = self.fft_dataset.add_pseudo_samples(fft_cons)
+                print(f"Added {added_rgb} shared samples to both datasets")
 
         if hasattr(self, 'scheduler_rgb'):
             self.scheduler_rgb.step()
@@ -100,163 +105,148 @@ class BlumMitchellCoTraining:
         # return self.evaluate(labeled_loader)
 
     def train_on_labeled(self, rgb_loader, fft_loader, optimizer_rgb, optimizer_fft):
-        """
-        :param rgb_loader: Data loader for RGB samples
-        :param fft_loader: Data loader for FFT samples
-        :param optimizer_rgb: Optimizer for RGB model
-        :param optimizer_fft: Optimizier for FFT model
-        :return: None
-        """
         self.model_rgb.train()
         self.model_fft.train()
 
-        total_loss_rgb = 0.0
-        total_loss_fft = 0.0
+        # Weight for consistency - starts at 0 and ramps up
+        alpha = 0.5
+        total_loss = 0
+        for (rgb_imgs, fft_imgs, labels) in rgb_loader:
+            rgb_imgs, fft_imgs, labels = rgb_imgs.to(self.device), fft_imgs.to(self.device), labels.to(self.device)
 
-        for rgb_inputs, fft_inputs, labels in rgb_loader:
-            rgb_inputs, fft_inputs, labels = rgb_inputs.to(self.device), fft_inputs.to(self.device), labels.to(
-                self.device)
+            T = 3.0  # Temperature for softening
+            logits_rgb = self.model_rgb(rgb_imgs)
+            logits_fft = self.model_fft(fft_imgs)
 
-            # Train RGB model
+            # 1. Standard CE Loss
+            loss_ce_rgb = self.criterion(logits_rgb, labels)
+            loss_ce_fft = self.criterion(logits_fft, labels)
+
+            # 2. Refined Consistency (FFT follows RGB)
+            with torch.no_grad():
+                # Soften the RGB targets to provide more 'distribution' info
+                target_probs = torch.softmax(logits_rgb / T, dim=1)
+
+            # Use log_softmax on FFT with the same Temperature
+            loss_consistency = nn.KLDivLoss(reduction='batchmean')(
+                torch.log_softmax(logits_fft / T, dim=1),
+                target_probs
+            ) * (T * T)  # Scaling factor for KL with temperature
+
+            # 3. Combined Loss
+            # Notice we prioritize the FFT model's consistency
+            total_loss = loss_ce_rgb + loss_ce_fft + (alpha * loss_consistency)
+
             optimizer_rgb.zero_grad()
-            rgb_outputs = self.model_rgb(rgb_inputs)
-            loss_rgb = self.criterion(rgb_outputs, labels)
-            loss_rgb.backward()
-            optimizer_rgb.step()
-
-            total_loss_rgb += loss_rgb.item() * rgb_inputs.size(0)
-
-        for rgb_inputs, fft_inputs, labels in fft_loader:
-            rgb_inputs, fft_inputs, labels = rgb_inputs.to(self.device), fft_inputs.to(self.device), labels.to(
-                self.device)
-
-            # Train FFT model
             optimizer_fft.zero_grad()
-            fft_outputs = self.model_fft(fft_inputs)
-            loss_fft = self.criterion(fft_outputs, labels)
-            loss_fft.backward()
+            total_loss.backward()
+            optimizer_rgb.step()
             optimizer_fft.step()
 
-        total_loss_fft += loss_fft.item() * fft_inputs.size(0)
+        print(f"The average loss on this epoch is: {total_loss}")
 
-        num_samples = len(rgb_loader.dataset) + len(fft_loader.dataset)
-        avg_total_loss = (total_loss_rgb + total_loss_fft) / num_samples if num_samples > 0 else 0.0
-        print(f"The average loss on this epoch is: {avg_total_loss}")
-
-    def label_unlabeled_data(self, unlabeled_loader, cotraining_start, epoch_counter, batch_size):
-        """
-        Method for labeling the unlabeled data.
-        :param unlabeled_loader: Loader for unsampled samples
-        :param cotraining_start: Default epoch number for the start of cotraining
-        :param epoch_counter: Actual epoch
-        :param batch_size: Size of the batch to be sampled
-        :return: Returns the RGB and FFT samples
-        """
+    def label_unlabeled_data(self, unlabeled_loader):
         self.model_rgb.eval()
         self.model_fft.eval()
 
-        rgb_confident = []
-        fft_confident = []
+        consensus_samples = []
         current_idx = 0
 
         with torch.no_grad():
-            for batch_idx, (rgb_inputs, fft_inputs, _) in enumerate(unlabeled_loader):
-                rgb_inputs, fft_inputs = rgb_inputs.to(self.device), fft_inputs.to(self.device)
+            for rgb_inputs, fft_inputs, _ in unlabeled_loader:
+                rgb_inputs = rgb_inputs.to(self.device)
+                fft_inputs = fft_inputs.to(self.device)
 
-                # Get predictions and confidence
                 rgb_probs = torch.softmax(self.model_rgb(rgb_inputs), dim=1)
                 fft_probs = torch.softmax(self.model_fft(fft_inputs), dim=1)
 
-                rgb_max_probs, rgb_preds = torch.max(rgb_probs, dim=1)
-                fft_max_probs, fft_preds = torch.max(fft_probs, dim=1)
+                combined_probs = (rgb_probs + fft_probs) / 2
 
-                # Select confident samples that haven't been used yet
+                max_probs, preds = torch.max(combined_probs, dim=1)
+
+                _, rgb_preds = torch.max(rgb_probs, dim=1)
+                _, fft_preds = torch.max(fft_probs, dim=1)
+
                 for i in range(len(rgb_inputs)):
                     sample_idx = current_idx + i
 
-                    # Only consider samples that haven't been used yet
                     if sample_idx not in self.used_unlabeled_indices:
-                        if rgb_max_probs[i] > self.confidence_thresh_rgb:
-                            rgb_confident.append((
-                                rgb_inputs[i].cpu(),
-                                fft_inputs[i].cpu(),
-                                rgb_preds[i].cpu().item(),
-                                sample_idx  # Include index for tracking
-                            ))
+                        agreement = (rgb_preds[i] == fft_preds[i])
+                        high_confidence = (max_probs[i] > (self.confidence_thresh_rgb + self.confidence_thresh_fft) / 2)
 
-                        if fft_max_probs[i] > self.confidence_thresh_fft:
-                            fft_confident.append((
-                                rgb_inputs[i].cpu(),
-                                fft_inputs[i].cpu(),
-                                fft_preds[i].cpu().item(),
-                                sample_idx  # Include index for tracking
-                            ))
+                        if agreement and high_confidence:
+                            consensus_samples.append({
+                                'data': (rgb_inputs[i].cpu(), fft_inputs[i].cpu(), preds[i].item()),
+                                'conf': max_probs[i].item(),
+                                'idx': sample_idx
+                            })
 
                 current_idx += len(rgb_inputs)
 
-        # Sort by confidence and take top k
-        rgb_confident.sort(
-            key=lambda x: torch.softmax(self.model_rgb(x[0].unsqueeze(0).to(self.device)), dim=1).max().item(),
-            reverse=True)
-        fft_confident.sort(
-            key=lambda x: torch.softmax(self.model_fft(x[1].unsqueeze(0).to(self.device)), dim=1).max().item(),
-            reverse=True)
+        consensus_samples.sort(key=lambda x: x['conf'], reverse=True)
 
-        # Take top k and mark indices as used
-        rgb_top_k = rgb_confident[:self.k]
-        fft_top_k = fft_confident[:self.k]
+        top_k_samples = consensus_samples[:self.k]
 
-        # Mark used indices
-        for _, _, _, idx in rgb_top_k:
-            self.used_unlabeled_indices.add(idx)
-        for _, _, _, idx in fft_top_k:
-            self.used_unlabeled_indices.add(idx)
+        final_samples = []
+        for s in top_k_samples:
+            self.used_unlabeled_indices.add(s['idx'])
+            final_samples.append(s['data'])
 
-        # Remove index from returned samples
-        rgb_samples = [(rgb, fft, label) for rgb, fft, label, _ in rgb_top_k]
-        fft_samples = [(rgb, fft, label) for rgb, fft, label, _ in fft_top_k]
-
-        return rgb_samples, fft_samples
+        return final_samples, final_samples
 
     def reevaluate_pseudo_labels(self, batch_size):
-        rgb_subset = random.sample(self.rgb_dataset.pseudo_samples,
-                                   min(self.checked_number,
-                                       len(self.rgb_dataset.pseudo_samples))) if self.rgb_dataset.pseudo_samples else []
-        fft_subset = random.sample(self.fft_dataset.pseudo_samples,
-                                   min(self.checked_number,
-                                       len(self.fft_dataset.pseudo_samples))) if self.fft_dataset.pseudo_samples else []
+        # We treat pseudo-samples as a shared pool now
+        rgb_pseudo = self.rgb_dataset.pseudo_samples if self.rgb_dataset.pseudo_samples else []
+        fft_pseudo = self.fft_dataset.pseudo_samples if self.fft_dataset.pseudo_samples else []
+
+        # Take a random subset to check
+        subset_size = min(self.checked_number, len(rgb_pseudo), len(fft_pseudo))
+        if subset_size == 0:
+            return 0, 0
+
+        # Since datasets are synced, we can just sample from one and check both
+        indices = random.sample(range(len(rgb_pseudo)), subset_size)
 
         self.model_rgb.eval()
         self.model_fft.eval()
-        rgb_samples_to_remove = []
-        fft_samples_to_remove = []
 
-        for sample in rgb_subset:
-            rgb_tensor, fft_tensor, pseudo_label = sample
+        samples_to_remove = []
+
+        for idx in indices:
+            # Both datasets should have the same sample at the same index
+            rgb_tensor, fft_tensor, pseudo_label = rgb_pseudo[idx]
+
             with torch.no_grad():
                 rgb_tensor = rgb_tensor.unsqueeze(0).to(self.device)
-                prediction = self.model_rgb(rgb_tensor)
-                rgb_probs = torch.softmax(prediction, dim=1)
-                rgb_max_probs, rgb_preds = torch.max(rgb_probs, dim=1)
-            if rgb_max_probs < self.confidence_thresh_rgb or rgb_preds != pseudo_label:
-                rgb_samples_to_remove.append(sample)
-
-        for sample in fft_subset:
-            rgb_tensor, fft_tensor, pseudo_label = sample
-            with torch.no_grad():
                 fft_tensor = fft_tensor.unsqueeze(0).to(self.device)
-                prediction = self.model_fft(fft_tensor)
-                fft_probs = torch.softmax(prediction, dim=1)
-                fft_max_probs, fft_preds = torch.max(fft_probs, dim=1)
 
-            if fft_max_probs < self.confidence_thresh_fft or fft_preds != pseudo_label:
-                fft_samples_to_remove.append(sample)
+                # Get predictions from both "eyes"
+                rgb_out = self.model_rgb(rgb_tensor)
+                fft_out = self.model_fft(fft_tensor)
 
-        rgb_count_removed = self.rgb_dataset.remove_pseudo_samples(rgb_samples_to_remove, self.confidence_thresh_rgb)
-        fft_count_removed = self.fft_dataset.remove_pseudo_samples(fft_samples_to_remove, self.confidence_thresh_fft)
+                rgb_probs = torch.softmax(rgb_out, dim=1)
+                fft_probs = torch.softmax(fft_out, dim=1)
 
-        print(f"Number of removed RGB samples is: {rgb_count_removed}")
-        print(f"Number of removed FFT samples is: {fft_count_removed}")
+                rgb_conf, rgb_pred = torch.max(rgb_probs, dim=1)
+                fft_conf, fft_pred = torch.max(fft_probs, dim=1)
+
+            # JOINT VETO LOGIC:
+            # Remove if:
+            # 1. Any model's confidence falls below its specific threshold
+            # 2. The models no longer agree with each other
+            # 3. Either model disagrees with the originally assigned pseudo-label
+            low_confidence = (rgb_conf < self.confidence_thresh_rgb or fft_conf < self.confidence_thresh_fft)
+            disagreement = (rgb_pred != fft_pred)
+            wrong_label = (rgb_pred != pseudo_label or fft_pred != pseudo_label)
+
+            if low_confidence or disagreement or wrong_label:
+                samples_to_remove.append(rgb_pseudo[idx])
+
+        # Remove the bad samples from BOTH datasets to keep them in sync
+        rgb_count_removed = self.rgb_dataset.remove_pseudo_samples(samples_to_remove, self.confidence_thresh_rgb)
+        fft_count_removed = self.fft_dataset.remove_pseudo_samples(samples_to_remove, self.confidence_thresh_fft)
+
+        print(f"Joint Reevaluation: Removed {rgb_count_removed} inconsistent samples from the shared pool.")
 
         return rgb_count_removed, fft_count_removed
 
