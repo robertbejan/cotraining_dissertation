@@ -5,7 +5,7 @@ import torch.utils.data
 
 
 def class_sorter():
-    xlsx_path = 'D:\Facultate\Disertatie\mainProject\pythonProject1\FETAL_PLANES_ZENODO\FETAL_PLANES_DB_data_filtered.xlsx'
+    xlsx_path = '/FETAL_PLANES_ZENODO/FETAL_PLANES_DB_data_filtered.xlsx'
 
     dataset = pd.read_excel(xlsx_path, sheet_name='FETAL_PLANES_DB_data')
     df = pd.DataFrame(dataset)
@@ -45,7 +45,7 @@ def get_class(df, img_name):
 
 
 def folder_sorter(df):
-    init_path = 'D:/Facultate/Disertatie/mainProject/pythonProject1/FETAL_PLANES_ZENODO/Images'
+    init_path = '/FETAL_PLANES_ZENODO/Images'
     final_path = 'D:/Facultate/Disertatie/mainProject/pythonProject1/all images'
     for (root, dirs, file) in os.walk(init_path):
         file = sorted(file)

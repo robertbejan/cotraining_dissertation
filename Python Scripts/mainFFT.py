@@ -148,7 +148,7 @@ test_paths = [
 
 # We will look for a 'validation' folder next to 'labeled_train' for each dataset,
 # or use the specific path for the small one as a fallback/check.
-VALIDATION_PATH_SMALL = "D:/Facultate/Disertatie/mainProject/pythonProject1/small_labeled_ultrasound_dataset/validation"
+VALIDATION_PATH_SMALL = "/small_labeled_ultrasound_dataset/validation"
 
 exp_labels = ["20% labeled"]
 
@@ -279,7 +279,7 @@ for i in range(len(train_paths)):
     print(f"Test Accuracy: {accuracy_test:.4f}")
 
     # 8. SAVE RESULTS TO EXCEL
-    excel_path = f"experiment_results_fft_squeezenet.xlsx"
+    excel_path = f"../experiment_results_fft_squeezenet.xlsx"
     sheet_name = f"Exp_{i + 1}_{exp_label}_SqueezeNet"
 
     # Load or create workbook

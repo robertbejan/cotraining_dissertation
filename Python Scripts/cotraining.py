@@ -86,7 +86,7 @@ class ExperimentConfig:
             # }
         }
 
-        base_path = "D:/Facultate/Disertatie/mainProject/pythonProject1/"
+        base_path = "//"
         dataset_info = dataset_map[dataset_type]
 
         self.labeled_path = os.path.join(base_path, dataset_info["base"], "labeled_train")
@@ -250,7 +250,7 @@ def run_experiment(config):
     combined_cm_string = serialize_confusion_matrix(combined_cm)
 
     # Save models
-    os.makedirs("models", exist_ok=True)
+    os.makedirs("../models", exist_ok=True)
     model_rgb_path = f"models/{config.experiment_id}_rgb2.pth"
     model_fft_path = f"models/{config.experiment_id}_fft2.pth"
     torch.save(model_rgb.state_dict(), model_rgb_path)
@@ -291,7 +291,7 @@ def run_experiment(config):
     return results
 
 
-def save_results_to_csv(results_list, filename="large_20_experiment_results.csv"):
+def save_results_to_csv(results_list, filename="large_20_experiment_results_FIRST.csv"):
     """
     Save or append results to CSV file
     """

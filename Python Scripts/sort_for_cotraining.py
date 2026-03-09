@@ -139,7 +139,7 @@ source_dirs = [
     r"D:\Facultate\Disertatie\mainProject\pythonProject1\consolidated_dataset_simple\test"
 ]
 
-destination_dir = r"D:\Facultate\Disertatie\mainProject\pythonProject1\organized_labeled_ultrasound_dataset"
+destination_dir = r"/organized_labeled_ultrasound_dataset"
 
 # Parameters
 test_size = 0.2

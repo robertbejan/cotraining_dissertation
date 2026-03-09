@@ -6,7 +6,7 @@ matplotlib.use('TkAgg')  # Or 'Qt5Agg' if you have PyQt installed
 import matplotlib.pyplot as plt
 
 # 1. Load the actual image (Use PIL for .png files)
-img_path = "D:/Facultate/Disertatie/mainProject/pythonProject1/organized_labeled_ultrasound_dataset/labeled_train/abdomen/Patient00216_Plane2_1_of_1.png"
+img_path = "/organized_labeled_ultrasound_dataset/labeled_train/abdomen/Patient00216_Plane2_1_of_1.png"
 image = Image.open(img_path).convert('L') # Load as Grayscale
 
 # 2. Transform to Tensor

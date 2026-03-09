@@ -21,7 +21,7 @@ from cotraining import BlumMitchellCoTraining, RGBWithFFTDataset
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
-test_path = "D:/Facultate/Disertatie/mainProject/pythonProject1/small_labeled_ultrasound_dataset/test"
+test_path = "/small_labeled_ultrasound_dataset/test"
 batch_size = 16
 input_size = (227, 227)
 model_rgb_path = "blum_mitchell_rgbV3.pth"

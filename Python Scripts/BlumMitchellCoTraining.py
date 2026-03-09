@@ -112,7 +112,7 @@ class BlumMitchellCoTraining:
         """
         This method performs the training iteration on the labeled/pseudo-labeled data. This uses a special objective
         loss function that uses KL divergence on the FFT model. This pushes the FFT model to have predictions closer to
-        the Gray model.
+        the Gray model. The alpha parameter determines the impact of the KL divergence loss (set to 0.5 by default).
         :param rgb_loader: The dataset for the Gray model
         :param fft_loader: The dataset for the FFT model (deprecated)
         :param optimizer_rgb: The optimizer for the Gray model (C-E)
