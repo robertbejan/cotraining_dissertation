@@ -9,9 +9,9 @@ from torch.utils.data import DataLoader
 from torchvision.models import SqueezeNet1_1_Weights
 import torch.fft
 
-from BlumMitchellCoTraining import BlumMitchellCoTraining
-from RGBWithFFTDataset import RGBWithFFTDataset
-from helper_functions import serialize_confusion_matrix
+from Scripts.RGBWithFFTDataset import RGBWithFFTDataset
+from Scripts.BlumMitchellCoTraining import BlumMitchellCoTraining
+from Scripts.helper_functions import serialize_confusion_matrix
 
 """                                                           Questions:
 - 
@@ -86,7 +86,7 @@ class ExperimentConfig:
             # }
         }
 
-        base_path = "//"
+        base_path = "D:/Facultate/Disertatie/mainProject/pythonProject1"
         dataset_info = dataset_map[dataset_type]
 
         self.labeled_path = os.path.join(base_path, dataset_info["base"], "labeled_train")
@@ -291,7 +291,7 @@ def run_experiment(config):
     return results
 
 
-def save_results_to_csv(results_list, filename="large_20_experiment_results_FIRST.csv"):
+def save_results_to_csv(results_list, filename="small_80_experiment_results_FIRST.csv"):
     """
     Save or append results to CSV file
     """

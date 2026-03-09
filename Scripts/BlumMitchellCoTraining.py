@@ -4,6 +4,7 @@ from sklearn.metrics import accuracy_score, confusion_matrix
 import random
 import torch.fft
 from torch.optim.lr_scheduler import StepLR
+import numpy as np
 
 
 class BlumMitchellCoTraining:
@@ -11,6 +12,7 @@ class BlumMitchellCoTraining:
     This class contains the LR schedulers, models, confidence thresholds, criterions and other information necessary
     to perform a full training of a CoTraining model.
     """
+
     def __init__(self, model_rgb, model_fft, num_classes, device, checked_number, cotraining_start, k=30,
                  confidence_thresh_fft=0.95,
                  confidence_thresh_rgb=0.9):
@@ -26,6 +28,8 @@ class BlumMitchellCoTraining:
         self.confidence_thresh_rgb = confidence_thresh_rgb
         self.criterion = nn.CrossEntropyLoss()
         self.cotraining_start = cotraining_start
+        self.base_alpha = 0.5
+        self.loss_history = []
 
         # Keep track of datasets for pseudo-labeling
         self.rgb_dataset = None
@@ -75,22 +79,6 @@ class BlumMitchellCoTraining:
                 rgb_removed, fft_removed = self.reevaluate_pseudo_labels(self.checked_number)
                 self.adjust_confidence_threshold(rgb_removed, fft_removed, self.checked_number)
 
-            # RGB model's confident predictions go to FFT dataset
-            # rgb_added = 0
-            # if rgb_confident_samples:
-            #     rgb_added = self.fft_dataset.add_pseudo_samples(rgb_confident_samples)
-            #     if rgb_added > 0:
-            #         print(f"Added {rgb_added} new RGB-labeled samples to FFT dataset")
-            # # FFT model's confident predictions go to RGB dataset
-            # fft_added = 0
-            # if fft_confident_samples:
-            #     fft_added = self.rgb_dataset.add_pseudo_samples(fft_confident_samples)
-            #     if fft_added > 0:
-            #         print(f"Added {fft_added} new FFT-labeled samples to RGB dataset")
-            #
-            # if rgb_added == 0 and fft_added == 0:
-            #     print("No new pseudo-labeled samples added (all were duplicates)")
-
             rgb_cons, fft_cons = self.label_unlabeled_data(unlabeled_loader)
 
             if rgb_cons:
@@ -105,6 +93,7 @@ class BlumMitchellCoTraining:
             self.scheduler_fft.step()
             print(
                 f"LR updated. RGB LR: {self.scheduler_rgb.get_last_lr()[0]:.6f}, FFT LR: {self.scheduler_fft.get_last_lr()[0]:.6f}")
+
         # 4. Evaluate
         # return self.evaluate(labeled_loader)
 
@@ -112,7 +101,8 @@ class BlumMitchellCoTraining:
         """
         This method performs the training iteration on the labeled/pseudo-labeled data. This uses a special objective
         loss function that uses KL divergence on the FFT model. This pushes the FFT model to have predictions closer to
-        the Gray model. The alpha parameter determines the impact of the KL divergence loss (set to 0.5 by default).
+        the Gray model. The alpha parameter determines the impact of the KL Divergence on the FFT model. Alpha is
+        dynamic and updates accordingly to high variations in the loss for the FFT model.
         :param rgb_loader: The dataset for the Gray model
         :param fft_loader: The dataset for the FFT model (deprecated)
         :param optimizer_rgb: The optimizer for the Gray model (C-E)
@@ -123,13 +113,16 @@ class BlumMitchellCoTraining:
         self.model_rgb.train()
         self.model_fft.train()
 
-        # Weight for consistency - starts at 0 and ramps up
-        alpha = 0.5
-        total_loss = 0
+        if len(self.loss_history) > 0:
+            avg_loss = sum(self.loss_history) / len(self.loss_history)
+        else:
+            avg_loss = None
+
+        epoch_losses = []
         for (rgb_imgs, fft_imgs, labels) in rgb_loader:
             rgb_imgs, fft_imgs, labels = rgb_imgs.to(self.device), fft_imgs.to(self.device), labels.to(self.device)
 
-            T = 3.0  # Temperature for softening
+            temperature = 3.0  # Temperature for softening
             logits_rgb = self.model_rgb(rgb_imgs)
             logits_fft = self.model_fft(fft_imgs)
 
@@ -140,25 +133,38 @@ class BlumMitchellCoTraining:
             # 2. Refined Consistency (FFT follows RGB)
             with torch.no_grad():
                 # Soften the RGB targets to provide more 'distribution' info
-                target_probs = torch.softmax(logits_rgb / T, dim=1)
+                target_probs = torch.softmax(logits_rgb / temperature, dim=1)
 
             # Use log_softmax on FFT with the same Temperature
             loss_consistency = nn.KLDivLoss(reduction='batchmean')(
-                torch.log_softmax(logits_fft / T, dim=1),
+                torch.log_softmax(logits_fft / temperature, dim=1),
                 target_probs
-            ) * (T * T)  # Scaling factor for KL with temperature
+            ) * (temperature * temperature)  # Scaling factor for KL with temperature
 
-            # 3. Combined Loss
-            # Notice we prioritize the FFT model's consistency
-            total_loss = loss_ce_rgb + loss_ce_fft + (alpha * loss_consistency)
+            current_alpha = self.base_alpha
+            if avg_loss and (loss_ce_fft.item() > avg_loss):
+                ratio = loss_ce_fft.item() / avg_loss
+                current_alpha = self.base_alpha * min(ratio, 2.0)
+
+            current_loss = loss_ce_rgb + loss_ce_fft + (current_alpha * loss_consistency)
 
             optimizer_rgb.zero_grad()
             optimizer_fft.zero_grad()
-            total_loss.backward()
+            current_loss.backward()
             optimizer_rgb.step()
             optimizer_fft.step()
 
-        print(f"The average loss on this epoch is: {total_loss}")
+            epoch_losses.append(current_loss.item())
+
+        mean_epoch_loss = sum(epoch_losses) / len(epoch_losses)
+        self.loss_history.append(mean_epoch_loss)
+
+        if len(self.loss_history) > 5:
+            self.loss_history.pop(0)
+
+        print(f"The value for alpha is now: {current_alpha:.4f}")
+        print(f"The average loss on this epoch is: {current_loss:.4f}")
+
 
     def label_unlabeled_data(self, unlabeled_loader):
         """
@@ -213,6 +219,8 @@ class BlumMitchellCoTraining:
         for s in top_k_samples:
             self.used_unlabeled_indices.add(s['idx'])
             final_samples.append(s['data'])
+
+        return final_samples, final_samples
 
     def reevaluate_pseudo_labels(self, batch_size):
 
