@@ -8,10 +8,12 @@ from torchvision import models, transforms
 from torch.utils.data import DataLoader
 from torchvision.models import SqueezeNet1_1_Weights
 import torch.fft
+import mlflow
+import mlflow.pytorch
 
-from BlumMitchellCoTraining import BlumMitchellCoTraining
-from RGBWithFFTDataset import RGBWithFFTDataset
-from helper_functions import serialize_confusion_matrix
+from Scripts.RGBWithFFTDataset import RGBWithFFTDataset
+from Scripts.BlumMitchellCoTraining import BlumMitchellCoTraining
+from Scripts.helper_functions import serialize_confusion_matrix
 
 """                                                           Questions:
 - 
@@ -48,6 +50,8 @@ databases, and a flag that indicates whether the object contains labeled/unlabel
 - evaluates the models
 """
 
+# Starting MLFlow API experiment
+mlflow.set_experiment("Fetal_Plane_CoTraining")
 
 # Parameters and setup
 class ExperimentConfig:
@@ -66,7 +70,7 @@ class ExperimentConfig:
         self.num_epochs = 60
         self.learning_rate = 1e-4
         self.k = 200
-        self.checked_number = 200
+        self.checked_number = 100
         self.cotraining_batch_size = 50
 
         # Dataset mapping
@@ -86,7 +90,7 @@ class ExperimentConfig:
             # }
         }
 
-        base_path = "//"
+        base_path = "D:/Facultate/Disertatie/mainProject/pythonProject1"
         dataset_info = dataset_map[dataset_type]
 
         self.labeled_path = os.path.join(base_path, dataset_info["base"], "labeled_train")
@@ -155,6 +159,23 @@ def run_experiment(config):
     :param config: The configurations class with all options
     :return: Returns the results in a dictionary
     """
+
+    with mlflow.start_run(run_name=config.experiment_id):
+        print("=" * 80)
+        print(f"Starting Experiment: {config.experiment_id}")
+
+        # 1. LOG PARAMETERS
+        mlflow.log_params({
+            "dataset_type": config.dataset_type,
+            "cotraining_start": config.cotraining_start,
+            "conf_rgb": config.conf_rgb,
+            "conf_fft": config.conf_fft,
+            "learning_rate": config.learning_rate,
+            "num_epochs": config.num_epochs,
+            "batch_size": config.batch_size,
+            "k_samples": config.k
+        })
+
     print("=" * 80)
     print(f"Starting Experiment: {config.experiment_id}")
     print(f"Dataset: {config.dataset_type} ({config.unlabeled_pct}% unlabeled)")
@@ -235,6 +256,12 @@ def run_experiment(config):
 
         # Evaluate on validation set
         rgb_acc, fft_acc, combined_acc, _, _, _ = cotrainer.evaluate(val_loader)
+
+        mlflow.log_metric("val_rgb_acc", rgb_acc, step=epoch_counter)
+        mlflow.log_metric("val_fft_acc", fft_acc, step=epoch_counter)
+        mlflow.log_metric("val_combined_acc", combined_acc, step=epoch_counter)
+        mlflow.log_metric("unlabeled_samples_used", len(cotrainer.used_unlabeled_indices), step=epoch_counter)
+
         print(f"Validation Accuracy - RGB: {rgb_acc:.4f}, FFT: {fft_acc:.4f}, Combined: {combined_acc:.4f}")
 
     # Final evaluation
@@ -244,6 +271,16 @@ def run_experiment(config):
     )
     rgb_acc, fft_acc, combined_acc, rgb_cm, fft_cm, combined_cm, = cotrainer.evaluate(test_loader)
     print(f"Test Accuracy - RGB: {rgb_acc:.4f}, FFT: {fft_acc:.4f}, Combined: {combined_acc:.4f}")
+
+    mlflow.log_metrics({
+        "test_rgb_acc": rgb_acc,
+        "test_fft_acc": fft_acc,
+        "test_combined_acc": combined_acc
+    })
+
+    # 4. LOG MODELS AS ARTIFACTS (Directly to MLflow)
+    mlflow.pytorch.log_model(model_rgb, "model_rgb")
+    mlflow.pytorch.log_model(model_fft, "model_fft")
 
     rgb_cm_string = serialize_confusion_matrix(rgb_cm)
     fft_cm_string = serialize_confusion_matrix(fft_cm)
@@ -291,7 +328,7 @@ def run_experiment(config):
     return results
 
 
-def save_results_to_csv(results_list, filename="large_20_experiment_results_FIRST.csv"):
+def save_results_to_csv(results_list, filename="small_80_experiment_results.csv"):
     """
     Save or append results to CSV file
     """

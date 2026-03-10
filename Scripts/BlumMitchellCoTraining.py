@@ -11,6 +11,7 @@ class BlumMitchellCoTraining:
     This class contains the LR schedulers, models, confidence thresholds, criterions and other information necessary
     to perform a full training of a CoTraining model.
     """
+
     def __init__(self, model_rgb, model_fft, num_classes, device, checked_number, cotraining_start, k=30,
                  confidence_thresh_fft=0.95,
                  confidence_thresh_rgb=0.9):
@@ -26,6 +27,9 @@ class BlumMitchellCoTraining:
         self.confidence_thresh_rgb = confidence_thresh_rgb
         self.criterion = nn.CrossEntropyLoss()
         self.cotraining_start = cotraining_start
+        self.base_alpha = 0.6
+        self.loss_history = []
+        self.random_dropout = True
 
         # Keep track of datasets for pseudo-labeling
         self.rgb_dataset = None
@@ -49,7 +53,10 @@ class BlumMitchellCoTraining:
         """Initializes the StepLR schedulers for both optimizers."""
         self.scheduler_rgb = StepLR(optimizer_rgb, step_size=step_size, gamma=gamma)
         self.scheduler_fft = StepLR(optimizer_fft, step_size=step_size, gamma=gamma)
-        print(f"Initialized StepLR schedulers: step_size={step_size}, gamma={gamma}")
+        print(f"Initialized "
+              f""
+              f""
+              f"StepLR schedulers: step_size={step_size}, gamma={gamma}")
 
     def train_iteration(self, rgb_loader, fft_loader, unlabeled_loader, optimizer_rgb, optimizer_fft, epoch_counter,
                         batch_size, reevaluate_flag):
@@ -72,24 +79,8 @@ class BlumMitchellCoTraining:
         # 2. Label unlabeled data
         if epoch_counter > self.cotraining_start:
             if reevaluate_flag:
-                rgb_removed, fft_removed = self.reevaluate_pseudo_labels(self.checked_number)
+                rgb_removed, fft_removed = self.reevaluate_pseudo_labels()
                 self.adjust_confidence_threshold(rgb_removed, fft_removed, self.checked_number)
-
-            # RGB model's confident predictions go to FFT dataset
-            # rgb_added = 0
-            # if rgb_confident_samples:
-            #     rgb_added = self.fft_dataset.add_pseudo_samples(rgb_confident_samples)
-            #     if rgb_added > 0:
-            #         print(f"Added {rgb_added} new RGB-labeled samples to FFT dataset")
-            # # FFT model's confident predictions go to RGB dataset
-            # fft_added = 0
-            # if fft_confident_samples:
-            #     fft_added = self.rgb_dataset.add_pseudo_samples(fft_confident_samples)
-            #     if fft_added > 0:
-            #         print(f"Added {fft_added} new FFT-labeled samples to RGB dataset")
-            #
-            # if rgb_added == 0 and fft_added == 0:
-            #     print("No new pseudo-labeled samples added (all were duplicates)")
 
             rgb_cons, fft_cons = self.label_unlabeled_data(unlabeled_loader)
 
@@ -105,6 +96,7 @@ class BlumMitchellCoTraining:
             self.scheduler_fft.step()
             print(
                 f"LR updated. RGB LR: {self.scheduler_rgb.get_last_lr()[0]:.6f}, FFT LR: {self.scheduler_fft.get_last_lr()[0]:.6f}")
+
         # 4. Evaluate
         # return self.evaluate(labeled_loader)
 
@@ -112,7 +104,8 @@ class BlumMitchellCoTraining:
         """
         This method performs the training iteration on the labeled/pseudo-labeled data. This uses a special objective
         loss function that uses KL divergence on the FFT model. This pushes the FFT model to have predictions closer to
-        the Gray model. The alpha parameter determines the impact of the KL divergence loss (set to 0.5 by default).
+        the Gray model. The alpha parameter determines the impact of the KL Divergence on the FFT model. Alpha is
+        dynamic and updates accordingly to high variations in the loss for the FFT model.
         :param rgb_loader: The dataset for the Gray model
         :param fft_loader: The dataset for the FFT model (deprecated)
         :param optimizer_rgb: The optimizer for the Gray model (C-E)
@@ -123,13 +116,12 @@ class BlumMitchellCoTraining:
         self.model_rgb.train()
         self.model_fft.train()
 
-        # Weight for consistency - starts at 0 and ramps up
-        alpha = 0.5
-        total_loss = 0
+        epoch_losses = []
+        current_alpha = 0
         for (rgb_imgs, fft_imgs, labels) in rgb_loader:
             rgb_imgs, fft_imgs, labels = rgb_imgs.to(self.device), fft_imgs.to(self.device), labels.to(self.device)
 
-            T = 3.0  # Temperature for softening
+            temperature = 3.0  # Temperature for softening
             logits_rgb = self.model_rgb(rgb_imgs)
             logits_fft = self.model_fft(fft_imgs)
 
@@ -140,25 +132,31 @@ class BlumMitchellCoTraining:
             # 2. Refined Consistency (FFT follows RGB)
             with torch.no_grad():
                 # Soften the RGB targets to provide more 'distribution' info
-                target_probs = torch.softmax(logits_rgb / T, dim=1)
+                target_probs = torch.softmax(logits_rgb / temperature, dim=1)
 
             # Use log_softmax on FFT with the same Temperature
             loss_consistency = nn.KLDivLoss(reduction='batchmean')(
-                torch.log_softmax(logits_fft / T, dim=1),
+                torch.log_softmax(logits_fft / temperature, dim=1),
                 target_probs
-            ) * (T * T)  # Scaling factor for KL with temperature
+            ) * (temperature * temperature)  # Scaling factor for KL with temperature
 
-            # 3. Combined Loss
-            # Notice we prioritize the FFT model's consistency
-            total_loss = loss_ce_rgb + loss_ce_fft + (alpha * loss_consistency)
+            current_alpha = self.base_alpha * 1.01
+            current_alpha = min(current_alpha, 1.2)
+
+            current_loss = loss_ce_rgb + loss_ce_fft + (current_alpha * loss_consistency)
 
             optimizer_rgb.zero_grad()
             optimizer_fft.zero_grad()
-            total_loss.backward()
+            current_loss.backward()
             optimizer_rgb.step()
             optimizer_fft.step()
 
-        print(f"The average loss on this epoch is: {total_loss}")
+            epoch_losses.append(current_loss.item())
+
+        self.base_alpha = current_alpha
+
+        print(f"The value for alpha is now: {current_alpha:.4f}")
+        print(f"The average loss on this epoch is: {epoch_losses[-1]:.4f}")
 
     def label_unlabeled_data(self, unlabeled_loader):
         """
@@ -214,7 +212,9 @@ class BlumMitchellCoTraining:
             self.used_unlabeled_indices.add(s['idx'])
             final_samples.append(s['data'])
 
-    def reevaluate_pseudo_labels(self, batch_size):
+        return final_samples, final_samples
+
+    def reevaluate_pseudo_labels(self):
 
         """
         This method reevaluates the pseudo-samples that have been added through co-training.
@@ -222,7 +222,6 @@ class BlumMitchellCoTraining:
         The models have a different prediction on the pseudo-sample OR
         One of the model predicted something difference from the actual pseudo-label THEN
         The sample will be removed from the dataset.
-        :param batch_size: Maximum number of samples to be removed
         :return: Returns the number of samples that have been removed
         """
 
@@ -238,39 +237,45 @@ class BlumMitchellCoTraining:
         # Since datasets are synced, we can just sample from one and check both
         indices = random.sample(range(len(rgb_pseudo)), subset_size)
 
-        self.model_rgb.eval()
-        self.model_fft.eval()
-
         samples_to_remove = []
 
-        for idx in indices:
-            # Both datasets should have the same sample at the same index
-            rgb_tensor, fft_tensor, pseudo_label = rgb_pseudo[idx]
+        if self.random_dropout:
+            samples_to_remove = [rgb_pseudo[i] for i in indices]
 
-            with torch.no_grad():
-                rgb_tensor = rgb_tensor.unsqueeze(0).to(self.device)
-                fft_tensor = fft_tensor.unsqueeze(0).to(self.device)
+            rgb_count_removed = self.rgb_dataset.remove_pseudo_samples(samples_to_remove)
+            fft_count_removed = self.fft_dataset.remove_pseudo_samples(samples_to_remove)
+        else:
+            self.model_rgb.eval()
+            self.model_fft.eval()
+            for idx in indices:
 
-                # Get predictions from both "eyes"
-                rgb_out = self.model_rgb(rgb_tensor)
-                fft_out = self.model_fft(fft_tensor)
+                # Both datasets should have the same sample at the same index
+                rgb_tensor, fft_tensor, pseudo_label = rgb_pseudo[idx]
 
-                rgb_probs = torch.softmax(rgb_out, dim=1)
-                fft_probs = torch.softmax(fft_out, dim=1)
+                with torch.no_grad():
+                    rgb_tensor = rgb_tensor.unsqueeze(0).to(self.device)
+                    fft_tensor = fft_tensor.unsqueeze(0).to(self.device)
 
-                rgb_conf, rgb_pred = torch.max(rgb_probs, dim=1)
-                fft_conf, fft_pred = torch.max(fft_probs, dim=1)
+                    # Get predictions from both views
+                    rgb_out = self.model_rgb(rgb_tensor)
+                    fft_out = self.model_fft(fft_tensor)
 
-            low_confidence = (rgb_conf < self.confidence_thresh_rgb or fft_conf < self.confidence_thresh_fft)
-            disagreement = (rgb_pred != fft_pred)
-            wrong_label = (rgb_pred != pseudo_label or fft_pred != pseudo_label)
+                    rgb_probs = torch.softmax(rgb_out, dim=1)
+                    fft_probs = torch.softmax(fft_out, dim=1)
 
-            if low_confidence or disagreement or wrong_label:
-                samples_to_remove.append(rgb_pseudo[idx])
+                    rgb_conf, rgb_pred = torch.max(rgb_probs, dim=1)
+                    fft_conf, fft_pred = torch.max(fft_probs, dim=1)
 
-        # Remove the bad samples from BOTH datasets to keep them in sync
-        rgb_count_removed = self.rgb_dataset.remove_pseudo_samples(samples_to_remove, self.confidence_thresh_rgb)
-        fft_count_removed = self.fft_dataset.remove_pseudo_samples(samples_to_remove, self.confidence_thresh_fft)
+                low_confidence = (rgb_conf < self.confidence_thresh_rgb or fft_conf < self.confidence_thresh_fft)
+                disagreement = (rgb_pred != fft_pred)
+                wrong_label = (rgb_pred != pseudo_label or fft_pred != pseudo_label)
+
+                if low_confidence or disagreement or wrong_label:
+                    samples_to_remove.append(rgb_pseudo[idx])
+
+            # Remove the bad samples from BOTH datasets to keep them in sync
+            rgb_count_removed = self.rgb_dataset.remove_pseudo_samples(samples_to_remove)
+            fft_count_removed = self.fft_dataset.remove_pseudo_samples(samples_to_remove)
 
         print(f"Joint Reevaluation: Removed {rgb_count_removed} inconsistent samples from the shared pool.")
 
@@ -294,19 +299,23 @@ class BlumMitchellCoTraining:
         rgb_removal_rate = rgb_removed / batch_size
         fft_removal_rate = fft_removed / batch_size
 
-        if rgb_removal_rate <= 0.3:
+        if self.random_dropout:
             self.confidence_thresh_rgb = self.confidence_thresh_rgb * 1.03
-        elif rgb_removal_rate <= 0.55:
-            self.confidence_thresh_rgb = self.confidence_thresh_rgb * 1.01
-        else:
-            self.confidence_thresh_rgb = self.confidence_thresh_rgb * 0.96
-
-        if fft_removal_rate <= 0.3:
             self.confidence_thresh_fft = self.confidence_thresh_fft * 1.03
-        elif fft_removal_rate <= 0.55:
-            self.confidence_thresh_fft = self.confidence_thresh_fft * 1.01
         else:
-            self.confidence_thresh_fft = self.confidence_thresh_fft * 0.96
+            if rgb_removal_rate <= 0.3:
+                self.confidence_thresh_rgb = self.confidence_thresh_rgb * 1.03
+            elif rgb_removal_rate <= 0.55:
+                self.confidence_thresh_rgb = self.confidence_thresh_rgb * 1.01
+            else:
+                self.confidence_thresh_rgb = self.confidence_thresh_rgb * 0.96
+
+            if fft_removal_rate <= 0.3:
+                self.confidence_thresh_fft = self.confidence_thresh_fft * 1.03
+            elif fft_removal_rate <= 0.55:
+                self.confidence_thresh_fft = self.confidence_thresh_fft * 1.01
+            else:
+                self.confidence_thresh_fft = self.confidence_thresh_fft * 0.96
 
         minimum_confidence = 0.985
 

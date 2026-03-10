@@ -68,11 +68,10 @@ class RGBWithFFTDataset(Dataset):
 
         return added_count
 
-    def remove_pseudo_samples(self, pseudo_samples, confidence_threshold):
+    def remove_pseudo_samples(self, pseudo_samples):
         """
         Remove samples based on threshold confidence
         :param pseudo_samples: The samples to be removed
-        :param confidence_threshold: The confidence threshold
         :return: Number of samples to be removed
         """
         removed_count = 0
