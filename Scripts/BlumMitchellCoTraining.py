@@ -4,7 +4,6 @@ from sklearn.metrics import accuracy_score, confusion_matrix
 import random
 import torch.fft
 from torch.optim.lr_scheduler import StepLR
-import numpy as np
 
 
 class BlumMitchellCoTraining:
@@ -53,7 +52,10 @@ class BlumMitchellCoTraining:
         """Initializes the StepLR schedulers for both optimizers."""
         self.scheduler_rgb = StepLR(optimizer_rgb, step_size=step_size, gamma=gamma)
         self.scheduler_fft = StepLR(optimizer_fft, step_size=step_size, gamma=gamma)
-        print(f"Initialized StepLR schedulers: step_size={step_size}, gamma={gamma}")
+        print(f"Initialized "
+              f""
+              f""
+              f"StepLR schedulers: step_size={step_size}, gamma={gamma}")
 
     def train_iteration(self, rgb_loader, fft_loader, unlabeled_loader, optimizer_rgb, optimizer_fft, epoch_counter,
                         batch_size, reevaluate_flag):
@@ -113,12 +115,8 @@ class BlumMitchellCoTraining:
         self.model_rgb.train()
         self.model_fft.train()
 
-        if len(self.loss_history) > 0:
-            avg_loss = sum(self.loss_history) / len(self.loss_history)
-        else:
-            avg_loss = None
-
         epoch_losses = []
+        current_alpha = 0
         for (rgb_imgs, fft_imgs, labels) in rgb_loader:
             rgb_imgs, fft_imgs, labels = rgb_imgs.to(self.device), fft_imgs.to(self.device), labels.to(self.device)
 
@@ -141,10 +139,8 @@ class BlumMitchellCoTraining:
                 target_probs
             ) * (temperature * temperature)  # Scaling factor for KL with temperature
 
-            current_alpha = self.base_alpha
-            if avg_loss and (loss_ce_fft.item() > avg_loss):
-                ratio = loss_ce_fft.item() / avg_loss
-                current_alpha = self.base_alpha * min(ratio, 2.0)
+            current_alpha = self.base_alpha * 1.01
+            current_alpha = min(current_alpha, 2)
 
             current_loss = loss_ce_rgb + loss_ce_fft + (current_alpha * loss_consistency)
 
@@ -156,15 +152,10 @@ class BlumMitchellCoTraining:
 
             epoch_losses.append(current_loss.item())
 
-        mean_epoch_loss = sum(epoch_losses) / len(epoch_losses)
-        self.loss_history.append(mean_epoch_loss)
-
-        if len(self.loss_history) > 5:
-            self.loss_history.pop(0)
+        self.base_alpha = current_alpha
 
         print(f"The value for alpha is now: {current_alpha:.4f}")
-        print(f"The average loss on this epoch is: {current_loss:.4f}")
-
+        print(f"The average loss on this epoch is: {epoch_losses[-1]:.4f}")
 
     def label_unlabeled_data(self, unlabeled_loader):
         """

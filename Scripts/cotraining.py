@@ -291,7 +291,7 @@ def run_experiment(config):
     return results
 
 
-def save_results_to_csv(results_list, filename="small_80_experiment_results_FIRST.csv"):
+def save_results_to_csv(results_list, filename="small_80_experiment_results.csv"):
     """
     Save or append results to CSV file
     """
