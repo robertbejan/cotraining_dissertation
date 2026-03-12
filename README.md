@@ -7,7 +7,7 @@
 - Independently trained branches: 0.7589 (FFT), 0.8907 (Gray)
 
 #### Version 3.5 release notes
-1. Integrated a weight loss based pseudo-labeling.
+1. Integrated a weighted loss based pseudo-labeling.
 #### Version 3 release notes
 1. Integrated stochastic pseudo-labeled sample filtering.
 2. Added MLFlow API for training and results visualization. 
@@ -27,6 +27,7 @@ Added features:
 4. Reevaluation of the added examples is done by feeding the samples to the models they were attributed to. **If the prediction is different**, the samples are removed from the datasets.
 5. Confidence threshold is what determines a label to be chosen. This is set as a **fixed value** and is being changed based on the **removal rate during the reevaluation**.
 6. Added a Learning Rate Scheduler.
+
 
 
 
