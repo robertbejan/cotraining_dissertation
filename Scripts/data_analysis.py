@@ -6,7 +6,7 @@ matplotlib.use('TkAgg')  # Or 'Qt5Agg' if you have PyQt installed
 import matplotlib.pyplot as plt
 
 # 1. Load the actual image (Use PIL for .png files)
-img_path = "/organized_labeled_ultrasound_dataset/labeled_train/abdomen/Patient00216_Plane2_1_of_1.png"
+img_path = "D:/Facultate/Disertatie/mainProject/pythonProject1/small_labeled_ultrasound_dataset/labeled_train/abdomen/Patient00704_Plane2_1_of_1.png"
 image = Image.open(img_path).convert('L') # Load as Grayscale
 
 # 2. Transform to Tensor
@@ -24,7 +24,7 @@ fft_log = torch.log1p(fft_magnitude)
 fft_viz = (fft_log - fft_log.min()) / (fft_log.max() - fft_log.min() + 1e-8)
 
 # 4. Visualization
-plt.figure(figsize=(12, 6))
+plt.figure(figsize=(6, 3))
 
 plt.subplot(1, 2, 1)
 plt.title("Original Ultrasound (Spatial)")

@@ -110,6 +110,10 @@ def initialize_rgb_model(num_classes, device):
     :return: The final model
     """
     model_rgb = models.squeezenet1_1(weights=SqueezeNet1_1_Weights.IMAGENET1K_V1)
+    new_layer = nn.Conv2d(1, 64, kernel_size=3, stride=2)
+    pre_trained_weights = model_rgb.features[0].weight.data
+    new_layer.weight.data = pre_trained_weights.mean(dim=1, keepdim=True)
+    model_rgb.features[0] = new_layer
     model_rgb.classifier[1] = nn.Conv2d(model_rgb.classifier[1].in_channels, num_classes, kernel_size=1)
     model_rgb.num_classes = num_classes
     model_rgb = model_rgb.to(device)
