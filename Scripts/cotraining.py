@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torchvision import models, transforms
 from torch.utils.data import DataLoader
-from torchvision.models import SqueezeNet1_1_Weights
+from torchvision.models import SqueezeNet1_1_Weights, ViT_B_16_Weights, vit_b_16
 import torch.fft
 import mlflow
 import mlflow.pytorch
@@ -123,6 +123,31 @@ def initialize_fft_model(num_classes, device):
     :param device: The device on which the model will be trained
     :return: The final model
     """
+
+    transformer = True
+
+    if transformer:
+        model_fft = vit_b_16(weights=ViT_B_16_Weights.IMAGENET1K_V1)
+
+        original_conv = model_fft.conv_proj
+        new_conv = nn.Conv2d(
+            in_channels=1,
+            out_channels=original_conv.out_channels,
+            kernel_size=original_conv.kernel_size,
+            stride=original_conv.stride
+        )
+
+        with torch.no_grad():
+            new_conv.weight.data = original_conv.weight.data.mean(dim=1, keepdim=True)
+            new_conv.bias.data = original_conv.bias.data
+
+        model_fft.conv_proj = new_conv
+
+        in_features = model_fft.heads.head.in_features
+        model_fft.heads.head = nn.Linear(in_features, num_classes)
+
+        model_fft.num_classes = num_classes
+
     model_fft = models.squeezenet1_1(weights=SqueezeNet1_1_Weights.IMAGENET1K_V1)
     new_layer = nn.Conv2d(1, 64, kernel_size=3, stride=2)
     pre_trained_weights = model_fft.features[0].weight.data
