@@ -1,7 +1,8 @@
 ﻿# Results and Release Notes
 
 #### Results on test dataset (on 20% labeled): 
-- Version 4: 0.8105 (FFT-ViT), 0.9218 (Gray)
+- Version 4 (Gray-ViT): 0.8194 (FFT), 0.9210 (Gray-ViT)  
+- Version 4 (FFT-ViT): 0.8105 (FFT-ViT), 0.9218 (Gray)
 - Version 3.5:  0.8222 (FFT), 0.9089 (Gray)
 - Version 3:  0.8217 (FFT), 0.9173 (Gray)
 - Version 2:  0.8137 (FFT), 0.9121 (Gray)
