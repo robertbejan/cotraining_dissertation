@@ -9,6 +9,20 @@
 - Version 1:  0.8012 (FFT), 0.8746 (Gray)
 - Independently trained branches: 0.7589 (FFT), 0.8907 (Gray)
 
+#### Results on test dataset (on 50% labeled): 
+- Version 4 (Gray-ViT): (FFT), (Gray-ViT)  
+- Version 4 (FFT-ViT): (FFT-ViT), (Gray)
+- Version 3.5: (FFT), (Gray)
+- Version 1: (FFT), (Gray)
+- Independently trained branches: (FFT), (Gray)
+
+#### Results on test dataset (on 80% labeled): 
+- Version 4 (Gray-ViT): (FFT), (Gray-ViT)  
+- Version 4 (FFT-ViT): (FFT-ViT), (Gray)
+- Version 3.5: (FFT), (Gray)
+- Version 1: (FFT), (Gray)
+- Independently trained branches: (FFT), (Gray)
+
 #### Version 3.5 release notes
 1. Integrated a weighted loss based pseudo-labeling.
 #### Version 3 release notes
