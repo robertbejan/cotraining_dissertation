@@ -6,7 +6,7 @@
 - Version 3.5:  0.8222 (FFT), 0.9089 (Gray)
 - Version 3:  0.8217 (FFT), 0.9173 (Gray)
 - Version 2:  0.8137 (FFT), 0.9121 (Gray)
-- Version 1:  0.8012 (FFT), 0.8746 (Gray)
+- Version 1:  0.8105 (FFT), 0.8940 (Gray)
 - Independently trained branches: 0.6907 (FFT), 0.8907 (Gray)
 
 #### Results on test dataset (on 50% labeled):
