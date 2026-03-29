@@ -96,6 +96,13 @@ class RGBWithFFTDataset(Dataset):
         return len(self.samples) + len(self.pseudo_samples)
 
     def __getitem__(self, idx):
+        """
+        This method loads and applies transformations to the samples. The spatial images are transformed into Gray scale
+        images and FFT domain samples. The latter ones, are transformed using the log of the magnitude and normalized
+        accordingly for the SqueezeNet backbone.
+        :param idx:
+        :return:
+        """
         # Check if we're accessing a pseudo-sample or regular sample
         if idx < len(self.samples):
             path, label = self.samples[idx]
@@ -112,8 +119,25 @@ class RGBWithFFTDataset(Dataset):
         # Compute FFT
         gray_image = transforms.Grayscale()(image)
         gray_tensor = transforms.ToTensor()(gray_image) if not isinstance(gray_image, torch.Tensor) else gray_image
-        fft_image = torch.abs(torch.fft.fftshift(torch.fft.fft2(gray_tensor.squeeze()))).float()
-        fft_image = fft_image.unsqueeze(0)  # Add channel dimension
+
+        # Get the complex FFT and shift low frequencies to center
+        f_complex = torch.fft.fft2(gray_tensor.squeeze())
+        f_shifted = torch.fft.fftshift(f_complex)
+
+        # Calculate Magnitude and apply Log-Scale (The "Magic" Step)
+        fft_magnitude = torch.abs(f_shifted)
+        fft_log = torch.log1p(fft_magnitude)
+
+        # Min-Max Normalization to [0, 1]
+        # This ensures the features are in a range SqueezeNet expects
+        eps = 1e-8
+        fft_min = fft_log.min()
+        fft_max = fft_log.max()
+        fft_normalized = (fft_log - fft_min) / (fft_max - fft_min + eps)
+
+        # Final Formatting
+        fft_image = fft_normalized.unsqueeze(0).float()
+
         if self.fft_transform:
             fft_image = self.fft_transform(fft_image)
 

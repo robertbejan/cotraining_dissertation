@@ -19,6 +19,7 @@ class BlumMitchellCoTraining:
         self.confidence_thresh_rgb = confidence_thresh_rgb
         self.criterion = nn.CrossEntropyLoss()
         self.cotraining_start = cotraining_start
+        self.random_dropout = False
 
         # Keep track of datasets for pseudo-labeling
         self.rgb_dataset = None
@@ -236,29 +237,46 @@ class BlumMitchellCoTraining:
         return rgb_count_removed, fft_count_removed
 
     def adjust_confidence_threshold(self, rgb_removed, fft_removed, batch_size):
+        """
+        This functions adjusts the confidence threshold during the reevaluation stage.
+        The confidence threshold for both models are modified as followed:
+        1. If the removal rate of pseudo-samples is below or equal to 30%, the threshold is augumented by 3%.
+        2. If the removal rate of pseudo-samples is below or equal to 55%, the threshold is augumented by 1%.
+        3. Else, the threshold is reduced by 4%.
+        Also, to help the models create new pseudo-labels, the confidence threshold is set to have the maximum 98.5%
+
+        :param rgb_removed: This contains the samples that have been predicted wrong for the Gray model
+        :param fft_removed: This contains the samples that have been predicted wrong for the FFT model
+        :param batch_size: The maximum number of samples that could have been removed
+        :return: None
+        """
+
         rgb_removal_rate = rgb_removed / batch_size
         fft_removal_rate = fft_removed / batch_size
 
-        if rgb_removal_rate > 0.5:
-            self.confidence_thresh_rgb = self.confidence_thresh_rgb * 0.95
-        elif rgb_removal_rate > 0.3:
-            self.confidence_thresh_rgb = self.confidence_thresh_rgb * 0.97
-        elif rgb_removal_rate > 0.1:
-            self.confidence_thresh_rgb = self.confidence_thresh_rgb * 0.99
+        if self.random_dropout:
+            self.confidence_thresh_rgb = self.confidence_thresh_rgb * 1.03
+            self.confidence_thresh_fft = self.confidence_thresh_fft * 1.03
         else:
-            pass
+            print("Adaptive confidence threshold")
+            if rgb_removal_rate <= 0.3:
+                self.confidence_thresh_rgb = self.confidence_thresh_rgb * 1.03
+            elif rgb_removal_rate <= 0.55:
+                self.confidence_thresh_rgb = self.confidence_thresh_rgb * 1.01
+            else:
+                self.confidence_thresh_rgb = self.confidence_thresh_rgb * 0.96
 
-        if fft_removal_rate > 0.5:
-            self.confidence_thresh_fft = self.confidence_thresh_fft * 0.95
-        elif fft_removal_rate > 0.3:
-            self.confidence_thresh_fft = self.confidence_thresh_fft * 0.97
-        elif fft_removal_rate > 0.1:
-            self.confidence_thresh_fft = self.confidence_thresh_fft * 0.99
-        else:
-            pass
+            if fft_removal_rate <= 0.3:
+                self.confidence_thresh_fft = self.confidence_thresh_fft * 1.03
+            elif fft_removal_rate <= 0.55:
+                self.confidence_thresh_fft = self.confidence_thresh_fft * 1.01
+            else:
+                self.confidence_thresh_fft = self.confidence_thresh_fft * 0.96
 
-        self.confidence_thresh_rgb = max(self.confidence_thresh_rgb, 0.75)
-        self.confidence_thresh_fft = max(self.confidence_thresh_fft, 0.70)
+        minimum_confidence = 0.985
+
+        self.confidence_thresh_rgb = min(max(self.confidence_thresh_rgb, 0.75), minimum_confidence)
+        self.confidence_thresh_fft = min(max(self.confidence_thresh_fft, 0.70), minimum_confidence)
 
         print(f"The removal rate for RGB dataset: {rgb_removal_rate}")
         print(f"The removal rate for FFT dataset: {fft_removal_rate}")
@@ -266,7 +284,6 @@ class BlumMitchellCoTraining:
         print(f"The new confidence threshold for FFT model is: {self.confidence_thresh_fft}")
 
         # self.checked_number = int(batch_size * (rgb_removal_rate + fft_removal_rate) / 2)
-
     def evaluate(self, loader):
         """
             Method to evaluate the models (RGB and FFT)

@@ -59,26 +59,26 @@ class ExperimentConfig:
         # Fixed parameters
         self.input_size = (227, 227)
         self.batch_size = 30
-        self.num_epochs = 20
+        self.num_epochs = 60
         self.learning_rate = 1e-4
         self.k = 200
-        self.checked_number = 200
+        self.checked_number = 100
         self.cotraining_batch_size = 50
 
         # Dataset mapping
         dataset_map = {
-            # "small_80": {
-                # "base": "small_labeled_ultrasound_dataset",
-                # "unlabeled_pct": 80
-            # }
+            "small_80": {
+                "base": "small_labeled_ultrasound_dataset",
+                "unlabeled_pct": 80
+            }
             # "organized_50": {
                 # "base": "organized_ultrasound_dataset",
                 # "unlabeled_pct": 50
             # },
-            "large_20": {
-                "base": "large_labeled_ultrasound_dataset",
-                "unlabeled_pct": 20
-            }
+            # "large_20": {
+            #     "base": "large_labeled_ultrasound_dataset",
+            #     "unlabeled_pct": 20
+            # }
         }
 
         # Set paths
@@ -277,13 +277,13 @@ def save_results_to_csv(results_list, filename="large_20_experiment_results.csv"
 
 def run_all_experiments():
     """Run all experiment combinations"""
-    datasets = ["large_20"]
+    datasets = ["small_80"]
     # datasets = ["small_80", "organized_50", "large_20"]
-    cotraining_starts = [5, 7, 10]
+    cotraining_starts = [5]
     threshold_configs = [
         {"rgb": 0.95, "fft": 0.90},  # High thresholds
-        {"rgb": 0.90, "fft": 0.85},  # Medium thresholds
-        {"rgb": 0.85, "fft": 0.80}  # Lower thresholds
+        # {"rgb": 0.90, "fft": 0.85},  # Medium thresholds
+        # {"rgb": 0.85, "fft": 0.80}  # Lower thresholds
     ]
 
     all_results = []
