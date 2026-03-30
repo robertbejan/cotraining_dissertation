@@ -3,6 +3,7 @@
 #### Results on test dataset (on 20% labeled): 
 - Version 4 (Gray-ViT): 0.8188 (FFT), 0.8859 (Gray-ViT)  
 - Version 4 (FFT-ViT): 0.8326 (FFT-ViT), 0.9258 (Gray)
+- Version 3.5 (ablation):  - (FFT), - (Gray)
 - Version 3.5:  0.8222 (FFT), 0.9089 (Gray)
 - Version 3:  0.8217 (FFT), 0.9173 (Gray)
 - Version 2:  0.8137 (FFT), 0.9121 (Gray)
@@ -12,6 +13,7 @@
 #### Results on test dataset (on 50% labeled):
 - Version 4 (Gray-ViT): 0.8460 (FFT), 0.9427 (Gray-ViT) 
 - Version 4 (FFT-ViT): 0.8278 (FFT-ViT), 0.9423 (Gray)
+- Version 3.5 (ablation):  - (FFT), - (Gray)
 - Version 3.5: 0.8522 (FFT), 0.9328 (Gray)
 - Version 1: 0.8452 (FFT), 0.9331 (Gray)
 - Independently trained branches: 0.7984 (FFT), 0.8935 (Gray)
@@ -19,6 +21,7 @@
 #### Results on test dataset (on 80% labeled):
 - Version 4 (Gray-ViT): 0.8516 (FFT), 0.9512 (Gray-ViT)  
 - Version 4 (FFT-ViT): 0.8294 (FFT-ViT), 0.9419 (Gray)
+- Version 3.5 (ablation):  - (FFT), - (Gray)
 - Version 3.5: 0.8522 (FFT), 0.9572 (Gray)
 - Version 1: 0.8242 (FFT), 0.9423 (Gray)
 - Independently trained branches: 0.8020 (FFT), 0.9068 (Gray)
