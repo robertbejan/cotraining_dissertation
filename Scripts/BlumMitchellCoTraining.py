@@ -308,14 +308,14 @@ class BlumMitchellCoTraining:
             elif rgb_removal_rate <= 0.55:
                 self.confidence_thresh_rgb = self.confidence_thresh_rgb * 1.01
             else:
-                self.confidence_thresh_rgb = self.confidence_thresh_rgb * 1.00
+                self.confidence_thresh_rgb = self.confidence_thresh_rgb * 0.96
 
             if fft_removal_rate <= 0.3:
                 self.confidence_thresh_fft = self.confidence_thresh_fft * 1.03
             elif fft_removal_rate <= 0.55:
                 self.confidence_thresh_fft = self.confidence_thresh_fft * 1.01
             else:
-                self.confidence_thresh_fft = self.confidence_thresh_fft * 1.00
+                self.confidence_thresh_fft = self.confidence_thresh_fft * 0.96
 
         minimum_confidence = 0.985
 
