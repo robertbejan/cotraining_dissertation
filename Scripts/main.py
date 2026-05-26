@@ -30,19 +30,19 @@ learning_rate = 1e-4
 
 # Paths
 save_model_paths = [
-    # "../../mainProject/pythonProject1/rezCNNsqueezenetFilteredOrganized.pth",
+    "../../mainProject/pythonProject1/rezCNNsqueezenetFilteredOrganized.pth",
     "../../mainProject/pythonProject1/rezCNNsqueezenetFilteredLarge.pth",
     "../../mainProject/pythonProject1/rezCNNsqueezenetFilteredSmall.pth"
 ]
 
 train_paths = [
-    # "D:/Facultate/Disertatie/mainProject/pythonProject1/organized_labeled_ultrasound_dataset/labeled_train",
+    "D:/Facultate/Disertatie/mainProject/pythonProject1/organized_labeled_ultrasound_dataset/labeled_train",
     "D:/Facultate/Disertatie/mainProject/pythonProject1/large_labeled_ultrasound_dataset/labeled_train",
     "D:/Facultate/Disertatie/mainProject/pythonProject1/small_labeled_ultrasound_dataset/labeled_train"
 ]
 
 test_paths = [
-    # "D:/Facultate/Disertatie/mainProject/pythonProject1/organized_labeled_ultrasound_dataset/test",
+    "D:/Facultate/Disertatie/mainProject/pythonProject1/organized_labeled_ultrasound_dataset/test",
     "D:/Facultate/Disertatie/mainProject/pythonProject1/large_labeled_ultrasound_dataset/test",
     "D:/Facultate/Disertatie/mainProject/pythonProject1/small_labeled_ultrasound_dataset/test"
 ]

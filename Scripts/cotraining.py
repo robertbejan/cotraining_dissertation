@@ -47,11 +47,11 @@ class ExperimentConfig:
             # "small_80": {
             #     "base": "small_labeled_ultrasound_dataset",
             #     "unlabeled_pct": 80
-            # }
-            # "organized_50": {
-            #     "base": "organized_labeled_ultrasound_dataset",
-            #     "unlabeled_pct": 50
             # },
+            "organized_50": {
+                "base": "organized_labeled_ultrasound_dataset",
+                "unlabeled_pct": 50
+            },
             "large_20": {
                 "base": "large_labeled_ultrasound_dataset",
                 "unlabeled_pct": 20
@@ -78,6 +78,11 @@ def initialize_rgb_model(num_classes, device):
     :return: The final model
     """
     model_rgb = models.squeezenet1_1(weights=SqueezeNet1_1_Weights.IMAGENET1K_V1)
+    new_layer = nn.Conv2d(1, 64, kernel_size=3, stride=2)
+    pre_trained_weights = model_rgb.features[0].weight.data
+    new_layer.weight.data = pre_trained_weights.mean(dim=1, keepdim=True)
+    new_layer.bias.data = model_rgb.features[0].bias.data 
+    model_rgb.features[0] = new_layer
     model_rgb.classifier[1] = nn.Conv2d(model_rgb.classifier[1].in_channels, num_classes, kernel_size=1)
     model_rgb.num_classes = num_classes
     model_rgb = model_rgb.to(device)
@@ -116,6 +121,7 @@ def initialize_fft_model(num_classes, device):
         new_layer = nn.Conv2d(1, 64, kernel_size=3, stride=2)
         pre_trained_weights = model_fft.features[0].weight.data
         new_layer.weight.data = pre_trained_weights.mean(dim=1, keepdim=True)
+        new_layer.bias.data = model_fft.features[0].bias.data
         model_fft.features[0] = new_layer
         model_fft.classifier[1] = nn.Conv2d(model_fft.classifier[1].in_channels, num_classes, kernel_size=1)
         model_fft.num_classes = num_classes
@@ -148,6 +154,8 @@ def run_experiment(config):
     :param config: The configurations class with all options
     :return: Returns the results in a dictionary
     """
+    if mlflow.active_run():
+        mlflow.end_run()
 
     with mlflow.start_run(run_name=config.experiment_id):
         print("=" * 80)
@@ -165,158 +173,157 @@ def run_experiment(config):
             "k_samples": config.k
         })
 
-    print("=" * 80)
-    print(f"Starting Experiment: {config.experiment_id}")
-    print(f"Dataset: {config.dataset_type} ({config.unlabeled_pct}% unlabeled)")
-    print(f"Co-training starts: Epoch {config.cotraining_start}")
-    print(f"Thresholds - RGB: {config.conf_rgb}, FFT: {config.conf_fft}")
-    print("=" * 80)
+        print("=" * 80)
+        print(f"Starting Experiment: {config.experiment_id}")
+        print(f"Dataset: {config.dataset_type} ({config.unlabeled_pct}% unlabeled)")
+        print(f"Co-training starts: Epoch {config.cotraining_start}")
+        print(f"Thresholds - RGB: {config.conf_rgb}, FFT: {config.conf_fft}")
+        print("=" * 80)
 
-    # Transforms
-    rgb_transform = transforms.Compose([
-        transforms.Resize(config.input_size_rgb),
-        transforms.ToTensor(),
-        transforms.Normalize([0.5, 0.5, 0.5], [0.2, 0.2, 0.2])
-    ])
+        # Transforms
+        rgb_transform = transforms.Compose([
+            transforms.Resize(config.input_size_rgb),
+            transforms.ToTensor(),
+            transforms.Grayscale(num_output_channels=1),
+            transforms.Normalize([0.5], [0.2])
+        ])
 
-    fft_transform = transforms.Compose([
-        transforms.Resize(config.input_size_fft),
-        transforms.Lambda(lambda x: x.unsqueeze(0) if x.dim() == 2 else x),
-        transforms.Normalize([0.5], [0.2])
-    ])
+        fft_transform = transforms.Compose([
+            transforms.Resize(config.input_size_fft),
+            transforms.Lambda(lambda x: x.unsqueeze(0) if x.dim() == 2 else x),
+            transforms.Normalize([0.5], [0.2])
+        ])
 
-    # Load datasets
-    rgb_dataset = RGBWithFFTDataset(config.labeled_path, rgb_transform, fft_transform, labeled=True)
-    fft_dataset = RGBWithFFTDataset(config.labeled_path, rgb_transform, fft_transform, labeled=True)
-    unlabeled_dataset = RGBWithFFTDataset(config.unlabeled_path, rgb_transform, fft_transform, labeled=False)
-    val_dataset = RGBWithFFTDataset(config.val_path, rgb_transform, fft_transform, labeled=True)
-    test_dataset = RGBWithFFTDataset(config.test_path, rgb_transform, fft_transform, labeled=True)
+        # Load datasets
+        rgb_dataset = RGBWithFFTDataset(config.labeled_path, rgb_transform, fft_transform, labeled=True)
+        fft_dataset = RGBWithFFTDataset(config.labeled_path, rgb_transform, fft_transform, labeled=True)
+        unlabeled_dataset = RGBWithFFTDataset(config.unlabeled_path, rgb_transform, fft_transform, labeled=False)
+        val_dataset = RGBWithFFTDataset(config.val_path, rgb_transform, fft_transform, labeled=True)
+        test_dataset = RGBWithFFTDataset(config.test_path, rgb_transform, fft_transform, labeled=True)
 
-    # Device and models
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-    num_classes = len(rgb_dataset.classes)
-    print(f"Number of classes: {num_classes}")
+        # Device and models
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Using device: {device}")
+        num_classes = len(rgb_dataset.classes)
+        print(f"Number of classes: {num_classes}")
 
-    model_rgb = initialize_rgb_model(num_classes, device)
-    model_fft = initialize_fft_model(num_classes, device)
+        model_rgb = initialize_rgb_model(num_classes, device)
+        model_fft = initialize_fft_model(num_classes, device)
 
-    # Co-training setup
-    cotrainer = BlumMitchellCoTraining(
-        model_rgb, model_fft, num_classes, device,
-        cotraining_start=config.cotraining_start,
-        k=config.k,
-        confidence_thresh_fft=config.conf_fft,
-        confidence_thresh_rgb=config.conf_rgb,
-        checked_number=config.checked_number
-    )
-    cotrainer.set_datasets(rgb_dataset, fft_dataset, unlabeled_dataset)
+        # Co-training setup
+        cotrainer = BlumMitchellCoTraining(
+            model_rgb, model_fft, num_classes, device,
+            cotraining_start=config.cotraining_start,
+            k=config.k,
+            confidence_thresh_fft=config.conf_fft,
+            confidence_thresh_rgb=config.conf_rgb,
+            checked_number=config.checked_number
+        )
+        cotrainer.set_datasets(rgb_dataset, fft_dataset, unlabeled_dataset)
 
-    optimizer_rgb = optim.Adam(model_rgb.parameters(), lr=config.learning_rate)
-    optimizer_fft = optim.Adam(model_fft.parameters(), lr=config.learning_rate)
+        optimizer_rgb = optim.Adam(model_rgb.parameters(), lr=config.learning_rate)
+        optimizer_fft = optim.Adam(model_fft.parameters(), lr=config.learning_rate)
 
-    # NEW - Initialize the LR schedulers - NEW
-    cotrainer.init_schedulers(
-        optimizer_rgb,
-        optimizer_fft,
-        step_size=5,
-        gamma=0.9
-    )
-
-    # Training loop
-    print("Starting co-training...")
-    for epoch in range(config.num_epochs):
-        print(f"\nEpoch {epoch + 1}/{config.num_epochs}")
-        epoch_counter = epoch + 1
-
-        rgb_loader, fft_loader, unlabeled_loader, val_loader, test_loader = create_loaders(
-            rgb_dataset, fft_dataset, unlabeled_dataset, val_dataset, test_dataset, config.batch_size
+        # NEW - Initialize the LR schedulers - NEW
+        cotrainer.init_schedulers(
+            optimizer_rgb,
+            optimizer_fft,
+            step_size=5,
+            gamma=0.9
         )
 
-        print(f"RGB dataset size: {len(rgb_dataset)}, FFT dataset size: {len(fft_dataset)}")
-        print(f"Used unlabeled samples: {len(cotrainer.used_unlabeled_indices)}/{len(unlabeled_dataset)}")
+        # Training loop
+        print("Starting co-training...")
+        for epoch in range(config.num_epochs):
+            print(f"\nEpoch {epoch + 1}/{config.num_epochs}")
+            epoch_counter = epoch + 1
 
-        reevaluate_flag = (epoch_counter > config.cotraining_start) and (epoch_counter % 4 == 0)
-        if reevaluate_flag:
-            print("Reevaluation is being performed on this iteration")
+            rgb_loader, fft_loader, unlabeled_loader, val_loader, test_loader = create_loaders(
+                rgb_dataset, fft_dataset, unlabeled_dataset, val_dataset, test_dataset, config.batch_size
+            )
 
-        cotrainer.train_iteration(rgb_loader, fft_loader, unlabeled_loader, optimizer_rgb, optimizer_fft,
-                                  epoch_counter, config.cotraining_batch_size, reevaluate_flag)
+            print(f"RGB dataset size: {len(rgb_dataset)}, FFT dataset size: {len(fft_dataset)}")
+            print(f"Used unlabeled samples: {len(cotrainer.used_unlabeled_indices)}/{len(unlabeled_dataset)}")
 
-        # Evaluate on validation set
-        rgb_acc, fft_acc, combined_acc, _, _, _ = cotrainer.evaluate(val_loader)
+            reevaluate_flag = (epoch_counter > config.cotraining_start) and (epoch_counter % 4 == 0)
+            if reevaluate_flag:
+                print("Reevaluation is being performed on this iteration")
 
-        mlflow.log_metric("val_rgb_acc", rgb_acc, step=epoch_counter)
-        mlflow.log_metric("val_fft_acc", fft_acc, step=epoch_counter)
-        mlflow.log_metric("val_combined_acc", combined_acc, step=epoch_counter)
-        mlflow.log_metric("unlabeled_samples_used", len(cotrainer.used_unlabeled_indices), step=epoch_counter)
+            cotrainer.train_iteration(rgb_loader, fft_loader, unlabeled_loader, optimizer_rgb, optimizer_fft,
+                                    epoch_counter, config.cotraining_batch_size, reevaluate_flag)
 
-        print(f"Validation Accuracy - RGB: {rgb_acc:.4f}, FFT: {fft_acc:.4f}, Combined: {combined_acc:.4f}")
+            # Evaluate on validation set
+            rgb_acc, fft_acc, combined_acc, _, _, _ = cotrainer.evaluate(val_loader)
 
-    # Final evaluation
-    print("\nTesting on test set...")
-    _, _, _, val_loader, test_loader = create_loaders(
-        rgb_dataset, fft_dataset, unlabeled_dataset, val_dataset, test_dataset, config.batch_size
-    )
-    rgb_acc, fft_acc, combined_acc, rgb_cm, fft_cm, combined_cm, = cotrainer.evaluate(test_loader)
-    print(f"Test Accuracy - RGB: {rgb_acc:.4f}, FFT: {fft_acc:.4f}, Combined: {combined_acc:.4f}")
+            mlflow.log_metric("val_rgb_acc", rgb_acc, step=epoch_counter)
+            mlflow.log_metric("val_fft_acc", fft_acc, step=epoch_counter)
+            mlflow.log_metric("val_combined_acc", combined_acc, step=epoch_counter)
+            mlflow.log_metric("unlabeled_samples_used", len(cotrainer.used_unlabeled_indices), step=epoch_counter)
 
-    mlflow.log_metrics({
-        "test_rgb_acc": rgb_acc,
-        "test_fft_acc": fft_acc,
-        "test_combined_acc": combined_acc
-    })
+            print(f"Validation Accuracy - RGB: {rgb_acc:.4f}, FFT: {fft_acc:.4f}, Combined: {combined_acc:.4f}")
 
-    # 4. LOG MODELS AS ARTIFACTS (Directly to MLflow)
-    mlflow.pytorch.log_model(model_rgb, "model_rgb")
-    mlflow.pytorch.log_model(model_fft, "model_fft")
+        # Final evaluation
+        print("\nTesting on test set...")
+        _, _, _, val_loader, test_loader = create_loaders(
+            rgb_dataset, fft_dataset, unlabeled_dataset, val_dataset, test_dataset, config.batch_size
+        )
+        rgb_acc, fft_acc, combined_acc, rgb_cm, fft_cm, combined_cm, = cotrainer.evaluate(test_loader)
+        print(f"Test Accuracy - RGB: {rgb_acc:.4f}, FFT: {fft_acc:.4f}, Combined: {combined_acc:.4f}")
 
-    rgb_cm_string = serialize_confusion_matrix(rgb_cm)
-    fft_cm_string = serialize_confusion_matrix(fft_cm)
-    combined_cm_string = serialize_confusion_matrix(combined_cm)
+        mlflow.log_metrics({
+            "test_rgb_acc": rgb_acc,
+            "test_fft_acc": fft_acc,
+            "test_combined_acc": combined_acc
+        })
 
-    # Save models
-    os.makedirs("../models", exist_ok=True)
-    model_rgb_path = f"models/{config.experiment_id}_rgb2.pth"
-    model_fft_path = f"models/{config.experiment_id}_fft2.pth"
-    torch.save(model_rgb.state_dict(), model_rgb_path)
-    torch.save(model_fft.state_dict(), model_fft_path)
-    print(f"Models saved: {model_rgb_path}, {model_fft_path}")
+        # 4. LOG MODELS AS ARTIFACTS (Directly to MLflow)
+        mlflow.pytorch.log_model(model_rgb, "model_rgb")
+        mlflow.pytorch.log_model(model_fft, "model_fft")
 
-    mlflow.stop_run()
+        rgb_cm_string = serialize_confusion_matrix(rgb_cm)
+        fft_cm_string = serialize_confusion_matrix(fft_cm)
+        combined_cm_string = serialize_confusion_matrix(combined_cm)
 
-    # Print final statistics
-    print(f"\nFinal Statistics:")
-    print(f"RGB dataset final size: {len(rgb_dataset)} (original + pseudo-labels)")
-    print(f"FFT dataset final size: {len(fft_dataset)} (original + pseudo-labels)")
-    print(f"Total unlabeled samples used: {len(cotrainer.used_unlabeled_indices)}/{len(unlabeled_dataset)}")
-    print(f"RGB pseudo-samples: {len(rgb_dataset.pseudo_samples)}")
-    print(f"FFT pseudo-samples: {len(fft_dataset.pseudo_samples)}")
+        # Save models
+        os.makedirs("../models", exist_ok=True)
+        model_rgb_path = f"models/{config.experiment_id}_rgb2.pth"
+        model_fft_path = f"models/{config.experiment_id}_fft2.pth"
+        torch.save(model_rgb.state_dict(), model_rgb_path)
+        torch.save(model_fft.state_dict(), model_fft_path)
+        print(f"Models saved: {model_rgb_path}, {model_fft_path}")
+        
+        # Print final statistics
+        print(f"\nFinal Statistics:")
+        print(f"RGB dataset final size: {len(rgb_dataset)} (original + pseudo-labels)")
+        print(f"FFT dataset final size: {len(fft_dataset)} (original + pseudo-labels)")
+        print(f"Total unlabeled samples used: {len(cotrainer.used_unlabeled_indices)}/{len(unlabeled_dataset)}")
+        print(f"RGB pseudo-samples: {len(rgb_dataset.pseudo_samples)}")
+        print(f"FFT pseudo-samples: {len(fft_dataset.pseudo_samples)}")
 
-    # Return results
-    results = {
-        "experiment_id": config.experiment_id,
-        "dataset": config.dataset_type,
-        "unlabeled_pct": config.unlabeled_pct,
-        "cotraining_start": config.cotraining_start,
-        "conf_rgb": config.conf_rgb,
-        "conf_fft": config.conf_fft,
-        "test_rgb_acc": rgb_acc,
-        "test_fft_acc": fft_acc,
-        "test_combined_acc": combined_acc,
-        "rgb_confusion_matrix": rgb_cm_string,
-        "fft_confusion_matrix": fft_cm_string,
-        "combined_confusion_matrix": combined_cm_string,
-        "num_classes": len(rgb_cm),
-        "final_rgb_size": len(rgb_dataset),
-        "final_fft_size": len(fft_dataset),
-        "unlabeled_used": len(cotrainer.used_unlabeled_indices),
-        "rgb_pseudo_samples": len(rgb_dataset.pseudo_samples),
-        "fft_pseudo_samples": len(fft_dataset.pseudo_samples),
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }
+        # Return results
+        results = {
+            "experiment_id": config.experiment_id,
+            "dataset": config.dataset_type,
+            "unlabeled_pct": config.unlabeled_pct,
+            "cotraining_start": config.cotraining_start,
+            "conf_rgb": config.conf_rgb,
+            "conf_fft": config.conf_fft,
+            "test_rgb_acc": rgb_acc,
+            "test_fft_acc": fft_acc,
+            "test_combined_acc": combined_acc,
+            "rgb_confusion_matrix": rgb_cm_string,
+            "fft_confusion_matrix": fft_cm_string,
+            "combined_confusion_matrix": combined_cm_string,
+            "num_classes": len(rgb_cm),
+            "final_rgb_size": len(rgb_dataset),
+            "final_fft_size": len(fft_dataset),
+            "unlabeled_used": len(cotrainer.used_unlabeled_indices),
+            "rgb_pseudo_samples": len(rgb_dataset.pseudo_samples),
+            "fft_pseudo_samples": len(fft_dataset.pseudo_samples),
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
 
-    return results
+        return results
 
 
 def save_results_to_csv(results_list, filename="small_80_experiment_results.csv"):
@@ -348,8 +355,8 @@ def run_all_experiments():
     """
     Run all experiment combinations
     """
+    datasets = ["organized_50", "large_20"]
     # datasets = ["small_80"]
-    datasets = ["large_20"]
     cotraining_starts = [5]  # , 7, 10]
     threshold_configs = [
         {"rgb": 0.95, "fft": 0.90},  # High thresholds

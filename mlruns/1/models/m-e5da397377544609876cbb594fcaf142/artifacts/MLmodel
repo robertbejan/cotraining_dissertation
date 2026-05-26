@@ -1,0 +1,23 @@
+artifact_path: file:C:/Users/Lavinia/Desktop/@BejanRobert/cotraining_dissertation/mlruns/1/models/m-e5da397377544609876cbb594fcaf142/artifacts
+flavors:
+  python_function:
+    config:
+      device: null
+    data: data
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.pytorch
+    pickle_module_name: mlflow.pytorch.pickle_module
+    python_version: 3.13.9
+  pytorch:
+    code: null
+    model_data: data
+    pytorch_version: 2.12.0.dev20260317+cu128
+mlflow_version: 3.10.1
+model_id: m-e5da397377544609876cbb594fcaf142
+model_size_bytes: 2928431
+model_uuid: m-e5da397377544609876cbb594fcaf142
+prompts: null
+run_id: bb264a5f9fd94a039b666def03533cca
+utc_time_created: '2026-05-26 18:59:39.948208'
