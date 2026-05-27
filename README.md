@@ -4,7 +4,7 @@
 - Version 4 (Gray-ViT): 0.8188 (FFT), 0.8859 (Gray-ViT)  
 - Version 4 (FFT-ViT): 0.8326 (FFT-ViT), 0.9258 (Gray)
 - Version 3.5 (ablation): 0.8073 (FFT), 0.9153 (Gray)
-- Version 3.5:  0.8222 (FFT), 0.9089 (Gray)
+- Version 3.5:  0.8040 (FFT), 0.9125 (Gray)
 - Version 3:  0.8217 (FFT), 0.9173 (Gray)
 - Version 2:  0.8137 (FFT), 0.9121 (Gray)
 - Version 1:  0.7774 (FFT), 0.8040 (Gray)
@@ -14,7 +14,7 @@
 - Version 4 (Gray-ViT): 0.8460 (FFT), 0.9427 (Gray-ViT) 
 - Version 4 (FFT-ViT): 0.8278 (FFT-ViT), 0.9423 (Gray)
 - Version 3.5 (ablation):  0.8298 (FFT), 0.9371 (Gray)
-- Version 3.5: 0.8522 (FFT), 0.9328 (Gray)
+- Version 3.5: 0.8322 (FFT), 0.9229 (Gray)
 - Version 1: 0.8452 (FFT), 0.9331 (Gray)
 - Independently trained branches: 0.7984 (FFT), 0.8935 (Gray)
 
@@ -22,7 +22,7 @@
 - Version 4 (Gray-ViT): 0.8516 (FFT), 0.9512 (Gray-ViT)  
 - Version 4 (FFT-ViT): 0.8294 (FFT-ViT), 0.9419 (Gray)
 - Version 3.5 (ablation): 0.8444 (FFT), 0.9403 (Gray)
-- Version 3.5: 0.8522 (FFT), 0.9572 (Gray)
+- Version 3.5: 0.8411 (FFT), 0.9387 (Gray)
 - Version 1: 0.8379 (FFT), 0.9323 (Gray)
 - Independently trained branches: 0.8020 (FFT), 0.9068 (Gray)
 
