@@ -23,7 +23,7 @@
 - Version 4 (FFT-ViT): 0.8294 (FFT-ViT), 0.9419 (Gray)
 - Version 3.5 (ablation): 0.8444 (FFT), 0.9403 (Gray)
 - Version 3.5: 0.8411 (FFT), 0.9459 (Gray)
-- Version 1: 0.8379 (FFT), 0.9323 (Gray)
+- Version 1: 0.8375 (FFT), 0.9403 (Gray)
 - Independently trained branches: 0.8020 (FFT), 0.9068 (Gray)
 
 -----------------------------------------------------------------------------------------
