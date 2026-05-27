@@ -16,7 +16,7 @@
 - Version 3.5 (ablation):  0.8298 (FFT), 0.9371 (Gray)
 - Version 3.5: 0.8411 (FFT), 0.938 (Gray)
 - Version 1: 0.8246 (FFT), 0.9319 (Gray)
-- Independently trained branches: 0.7984 (FFT), 0.8935 (Gray)
+- Independently trained branches: 0.7984 (FFT), 0.9080 (Gray)
 
 #### Results on test dataset (on 80% labeled):
 - Version 4 (Gray-ViT): 0.8516 (FFT), 0.9512 (Gray-ViT)  
