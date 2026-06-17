@@ -48,10 +48,10 @@ class ExperimentConfig:
             #     "base": "small_labeled_ultrasound_dataset",
             #     "unlabeled_pct": 80
             # },
-            "organized_50": {
-                "base": "organized_labeled_ultrasound_dataset",
-                "unlabeled_pct": 50
-            },
+            # "organized_50": {
+            #     "base": "organized_labeled_ultrasound_dataset",
+            #     "unlabeled_pct": 50
+            # },
             "large_20": {
                 "base": "large_labeled_ultrasound_dataset",
                 "unlabeled_pct": 20
@@ -355,7 +355,7 @@ def run_all_experiments():
     """
     Run all experiment combinations
     """
-    datasets = ["organized_50", "large_20"]
+    datasets = ["large_20"]
     # datasets = ["small_80"]
     cotraining_starts = [5]  # , 7, 10]
     threshold_configs = [

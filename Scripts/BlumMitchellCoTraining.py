@@ -117,60 +117,90 @@ class BlumMitchellCoTraining:
         :return: None
         """
 
-        self.model_rgb.train()
-        self.model_fft.train()
+        ablation = True
 
-        epoch_losses = []
-        current_alpha = self.base_alpha
-        mean_denominator = []
-        mean_loss_ce_rgb = []
-        mean_loss_ce_fft = []
-        for (rgb_imgs, fft_imgs, labels) in rgb_loader:
-            rgb_imgs, fft_imgs, labels = rgb_imgs.to(self.device), fft_imgs.to(self.device), labels.to(self.device)
+        if not ablation:
+            self.model_rgb.train()
+            self.model_fft.train()
 
-            temperature = 3.0  # Temperature for softening
-            logits_rgb = self.model_rgb(rgb_imgs)
-            logits_fft = self.model_fft(fft_imgs)
+            epoch_losses = []
+            current_alpha = self.base_alpha
+            mean_denominator = []
+            mean_loss_ce_rgb = []
+            mean_loss_ce_fft = []
+            for (rgb_imgs, fft_imgs, labels) in rgb_loader:
+                rgb_imgs, fft_imgs, labels = rgb_imgs.to(self.device), fft_imgs.to(self.device), labels.to(self.device)
 
-            # 1. Standard CE Loss
-            loss_ce_rgb = self.criterion(logits_rgb, labels)
-            loss_ce_fft = self.criterion(logits_fft, labels)
+                temperature = 3.0  # Temperature for softening
+                logits_rgb = self.model_rgb(rgb_imgs)
+                logits_fft = self.model_fft(fft_imgs)
 
-            with torch.no_grad():
-                # Soften the RGB targets to provide more 'distribution' info
-                target_probs = torch.softmax(logits_rgb / temperature, dim=1)
+                # 1. Standard CE Loss
+                loss_ce_rgb = self.criterion(logits_rgb, labels)
+                loss_ce_fft = self.criterion(logits_fft, labels)
 
-            # Use log_softmax on FFT with the same Temperature
-            loss_consistency = nn.KLDivLoss(reduction='batchmean')(
-                torch.log_softmax(logits_fft / temperature, dim=1),
-                target_probs
-            ) * (temperature * temperature)  # Scaling factor for KL with temperature
+                with torch.no_grad():
+                    # Soften the RGB targets to provide more 'distribution' info
+                    target_probs = torch.softmax(logits_rgb / temperature, dim=1)
 
-            current_alpha = self.base_alpha * 1.01
-            current_alpha = min(current_alpha, 1.2)
+                # Use log_softmax on FFT with the same Temperature
+                loss_consistency = nn.KLDivLoss(reduction='batchmean')(
+                    torch.log_softmax(logits_fft / temperature, dim=1),
+                    target_probs
+                ) * (temperature * temperature)  # Scaling factor for KL with temperature
 
-            current_loss = loss_ce_rgb + loss_ce_fft + (current_alpha * loss_consistency)
+                current_alpha = self.base_alpha * 1.01
+                current_alpha = min(current_alpha, 1.2)
 
-            optimizer_rgb.zero_grad()
-            optimizer_fft.zero_grad()
-            current_loss.backward()
-            optimizer_rgb.step()
-            optimizer_fft.step()
+                current_loss = loss_ce_rgb + loss_ce_fft + (current_alpha * loss_consistency)
 
-            mean_loss_ce_rgb.append(loss_ce_rgb.item())
-            mean_loss_ce_fft.append(loss_ce_fft.item())
-            mean_denominator.append((loss_ce_rgb+loss_ce_fft+1e-8).item())
+                optimizer_rgb.zero_grad()
+                optimizer_fft.zero_grad()
+                current_loss.backward()
+                optimizer_rgb.step()
+                optimizer_fft.step()
 
-            epoch_losses.append(current_loss.item())
+                mean_loss_ce_rgb.append(loss_ce_rgb.item())
+                mean_loss_ce_fft.append(loss_ce_fft.item())
+                mean_denominator.append((loss_ce_rgb+loss_ce_fft+1e-8).item())
 
-        self.base_alpha = current_alpha
-        print(f"The value for alpha is now: {current_alpha:.4f}")
-        loss_ce_rgb = np.mean(mean_loss_ce_rgb)
-        loss_ce_fft = np.mean(mean_loss_ce_fft)
-        denominator = loss_ce_rgb + loss_ce_fft + 1e-8
-        self.weight_rgb = np.mean(mean_loss_ce_rgb)/denominator
-        self.weight_fft = np.mean(mean_loss_ce_fft)/denominator
-        print(f"The average loss on this epoch is: {np.mean(epoch_losses):.4f}")
+                epoch_losses.append(current_loss.item())
+
+            self.base_alpha = current_alpha
+            print(f"The value for alpha is now: {current_alpha:.4f}")
+            loss_ce_rgb = np.mean(mean_loss_ce_rgb)
+            loss_ce_fft = np.mean(mean_loss_ce_fft)
+            denominator = loss_ce_rgb + loss_ce_fft + 1e-8
+            self.weight_rgb = np.mean(mean_loss_ce_rgb)/denominator
+            self.weight_fft = np.mean(mean_loss_ce_fft)/denominator
+            print(f"The average loss on this epoch is: {np.mean(epoch_losses):.4f}")
+
+        else:
+            self.model_rgb.train()
+            self.model_fft.train()
+
+            for rgb_inputs, fft_inputs, labels in rgb_loader:
+                rgb_inputs, fft_inputs, labels = rgb_inputs.to(self.device), fft_inputs.to(self.device), labels.to(
+                    self.device)
+
+                # Train RGB model
+                optimizer_rgb.zero_grad()
+                rgb_outputs = self.model_rgb(rgb_inputs)
+                loss_rgb = self.criterion(rgb_outputs, labels)
+                loss_rgb.backward()
+                optimizer_rgb.step()
+
+            for rgb_inputs, fft_inputs, labels in fft_loader:
+                rgb_inputs, fft_inputs, labels = rgb_inputs.to(self.device), fft_inputs.to(self.device), labels.to(
+                    self.device)
+
+                # Train FFT model
+                optimizer_fft.zero_grad()
+                fft_outputs = self.model_fft(fft_inputs)
+                loss_fft = self.criterion(fft_outputs, labels)
+                loss_fft.backward()
+                optimizer_fft.step()
+
 
     def label_unlabeled_data(self, unlabeled_loader):
         """
