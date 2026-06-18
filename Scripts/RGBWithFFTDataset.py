@@ -31,7 +31,7 @@ class RGBWithFFTDataset(Dataset):
         self.samples = []
         self.pseudo_samples = []  # Store pseudo-labeled samples separately
         self.pseudo_sample_hashes = set()  # Track pseudo-sample hashes to prevent duplicates
-        self.unlabeled_used = set()  # Track which unlabeled samples have been used
+        self.unlabeled_used = set()  # Track which unlabeled samples have been use
 
         if labeled:
             for class_name in self.classes:
