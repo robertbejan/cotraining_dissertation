@@ -14,6 +14,7 @@ import mlflow.pytorch
 from Scripts.RGBWithFFTDataset import RGBWithFFTDataset
 from Scripts.BlumMitchellCoTraining import BlumMitchellCoTraining
 from Scripts.helper_functions import serialize_confusion_matrix
+from Scripts.fft_ensemble import FFTEnsembleModel
 
 """                                                           Questions:
 - 
@@ -58,10 +59,10 @@ class ExperimentConfig:
     """
     This class contains the configurations necessary for the training.
     """
-    def __init__(self, dataset_type, cotraining_start, conf_rgb, conf_fft):
+    def __init__(self, dataset_type, cotraining_start, conf_grayscale, conf_fft):
         self.dataset_type = dataset_type
         self.cotraining_start = cotraining_start
-        self.conf_rgb = conf_rgb
+        self.conf_grayscale = conf_grayscale
         self.conf_fft = conf_fft
 
         # Fixed parameters
@@ -99,49 +100,41 @@ class ExperimentConfig:
         self.test_path = os.path.join(base_path, dataset_info["base"], "test")
 
         self.unlabeled_pct = dataset_info["unlabeled_pct"]
-        self.experiment_id = f"{dataset_type}_start{cotraining_start}_rgb{conf_rgb}_fft{conf_fft}"
+        self.experiment_id = f"{dataset_type}_start{cotraining_start}_grayscale{conf_grayscale}_fft{conf_fft}"
 
 
-def initialize_rgb_model(num_classes, device):
+def initialize_grayscale_model(num_classes, device):
     """
-    This function initializes the Gray (RGB) model backbone of SqueezeNet with IMAGENET weights.
+    This function initializes the Grayscale SqueezeNet backbone with ImageNet weights.
     :param num_classes: The number of classes
     :param device: The device on which the model will be trained
     :return: The final model
     """
-    model_rgb = models.squeezenet1_1(weights=SqueezeNet1_1_Weights.IMAGENET1K_V1)
+    model_grayscale = models.squeezenet1_1(weights=SqueezeNet1_1_Weights.IMAGENET1K_V1)
     new_layer = nn.Conv2d(1, 64, kernel_size=3, stride=2)
-    pre_trained_weights = model_rgb.features[0].weight.data
+    pre_trained_weights = model_grayscale.features[0].weight.data
     new_layer.weight.data = pre_trained_weights.mean(dim=1, keepdim=True)
-    model_rgb.features[0] = new_layer
-    model_rgb.classifier[1] = nn.Conv2d(model_rgb.classifier[1].in_channels, num_classes, kernel_size=1)
-    model_rgb.num_classes = num_classes
-    model_rgb = model_rgb.to(device)
-    return model_rgb
+    model_grayscale.features[0] = new_layer
+    model_grayscale.classifier[1] = nn.Conv2d(model_grayscale.classifier[1].in_channels, num_classes, kernel_size=1)
+    model_grayscale.num_classes = num_classes
+    model_grayscale = model_grayscale.to(device)
+    return model_grayscale
 
 
 def initialize_fft_model(num_classes, device):
     """
-    This function initializes the FFT model backbone of SqueezeNet with IMAGENET weights.
+    Initialize the DINOv2, FFT autoencoder, and XGBoost branch.
     :param num_classes: The number of classes
     :param device: The device on which the model will be trained
     :return: The final model
     """
-    model_fft = models.squeezenet1_1(weights=SqueezeNet1_1_Weights.IMAGENET1K_V1)
-    new_layer = nn.Conv2d(1, 64, kernel_size=3, stride=2)
-    pre_trained_weights = model_fft.features[0].weight.data
-    new_layer.weight.data = pre_trained_weights.mean(dim=1, keepdim=True)
-    model_fft.features[0] = new_layer
-    model_fft.classifier[1] = nn.Conv2d(model_fft.classifier[1].in_channels, num_classes, kernel_size=1)
-    model_fft.num_classes = num_classes
-    model_fft = model_fft.to(device)
-    return model_fft
+    return FFTEnsembleModel(num_classes, device)
 
 
-def create_loaders(rgb_data, fft_data, unlabeled_data, val_data, test_data, batch_size):
+def create_loaders(grayscale_data, fft_data, unlabeled_data, val_data, test_data, batch_size):
     """
     This function creates the Dataloaders for all datasets (training, validation and test)
-    :param rgb_data: Gray Dataloader
+    :param grayscale_data: Grayscale Dataloader
     :param fft_data: FFT Dataloader
     :param unlabeled_data: Unlabeled Dataloader
     :param val_data: Validation Dataloader
@@ -149,12 +142,12 @@ def create_loaders(rgb_data, fft_data, unlabeled_data, val_data, test_data, batc
     :param batch_size: Mini-batch size
     :return: Returns the Dataloaders
     """
-    rgb_loader = DataLoader(rgb_data, batch_size=batch_size, shuffle=True)
+    grayscale_loader = DataLoader(grayscale_data, batch_size=batch_size, shuffle=True)
     fft_loader = DataLoader(fft_data, batch_size=batch_size, shuffle=True)
     unlabeled_loader = DataLoader(unlabeled_data, batch_size=batch_size, shuffle=False)
     val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
-    return rgb_loader, fft_loader, unlabeled_loader, val_loader, test_loader
+    return grayscale_loader, fft_loader, unlabeled_loader, val_loader, test_loader
 
 
 def run_experiment(config):
@@ -172,7 +165,7 @@ def run_experiment(config):
         mlflow.log_params({
             "dataset_type": config.dataset_type,
             "cotraining_start": config.cotraining_start,
-            "conf_rgb": config.conf_rgb,
+            "conf_grayscale": config.conf_grayscale,
             "conf_fft": config.conf_fft,
             "learning_rate": config.learning_rate,
             "num_epochs": config.num_epochs,
@@ -184,56 +177,62 @@ def run_experiment(config):
     print(f"Starting Experiment: {config.experiment_id}")
     print(f"Dataset: {config.dataset_type} ({config.unlabeled_pct}% unlabeled)")
     print(f"Co-training starts: Epoch {config.cotraining_start}")
-    print(f"Thresholds - RGB: {config.conf_rgb}, FFT: {config.conf_fft}")
+    print(f"Thresholds - Grayscale: {config.conf_grayscale}, FFT: {config.conf_fft}")
     print("=" * 80)
 
     # Transforms
-    rgb_transform = transforms.Compose([
+    grayscale_transform = transforms.Compose([
         transforms.Resize(config.input_size),
+        transforms.Grayscale(num_output_channels=1),
         transforms.ToTensor(),
-        transforms.Normalize([0.5, 0.5, 0.5], [0.2, 0.2, 0.2])
+        transforms.Normalize([0.485], [0.229])
+    ])
+
+    dino_transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.Grayscale(num_output_channels=1),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485], [0.229])
     ])
 
     fft_transform = transforms.Compose([
         transforms.Resize(config.input_size),
         transforms.Lambda(lambda x: x.unsqueeze(0) if x.dim() == 2 else x),
-        transforms.Normalize([0.5], [0.2])
+        transforms.Normalize([0.485], [0.229])
     ])
 
     # Load datasets
-    rgb_dataset = RGBWithFFTDataset(config.labeled_path, rgb_transform, fft_transform, labeled=True)
-    fft_dataset = RGBWithFFTDataset(config.labeled_path, rgb_transform, fft_transform, labeled=True)
-    unlabeled_dataset = RGBWithFFTDataset(config.unlabeled_path, rgb_transform, fft_transform, labeled=False)
-    val_dataset = RGBWithFFTDataset(config.val_path, rgb_transform, fft_transform, labeled=True)
-    test_dataset = RGBWithFFTDataset(config.test_path, rgb_transform, fft_transform, labeled=True)
+    grayscale_dataset = RGBWithFFTDataset(config.labeled_path, grayscale_transform, fft_transform, dino_transform, labeled=True)
+    fft_dataset = RGBWithFFTDataset(config.labeled_path, grayscale_transform, fft_transform, dino_transform, labeled=True)
+    unlabeled_dataset = RGBWithFFTDataset(config.unlabeled_path, grayscale_transform, fft_transform, dino_transform, labeled=False)
+    val_dataset = RGBWithFFTDataset(config.val_path, grayscale_transform, fft_transform, dino_transform, labeled=True)
+    test_dataset = RGBWithFFTDataset(config.test_path, grayscale_transform, fft_transform, dino_transform, labeled=True)
 
     # Device and models
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
-    num_classes = len(rgb_dataset.classes)
+    num_classes = len(grayscale_dataset.classes)
     print(f"Number of classes: {num_classes}")
 
-    model_rgb = initialize_rgb_model(num_classes, device)
+    model_grayscale = initialize_grayscale_model(num_classes, device)
     model_fft = initialize_fft_model(num_classes, device)
 
     # Co-training setup
     cotrainer = BlumMitchellCoTraining(
-        model_rgb, model_fft, num_classes, device,
+        model_grayscale, model_fft, num_classes, device,
         cotraining_start=config.cotraining_start,
         k=config.k,
         confidence_thresh_fft=config.conf_fft,
-        confidence_thresh_rgb=config.conf_rgb,
+        confidence_thresh_grayscale=config.conf_grayscale,
         checked_number=config.checked_number
     )
-    cotrainer.set_datasets(rgb_dataset, fft_dataset, unlabeled_dataset)
+    cotrainer.set_datasets(grayscale_dataset, fft_dataset, unlabeled_dataset)
 
-    optimizer_rgb = optim.Adam(model_rgb.parameters(), lr=config.learning_rate)
-    optimizer_fft = optim.Adam(model_fft.parameters(), lr=config.learning_rate)
+    optimizer_grayscale = optim.Adam(model_grayscale.parameters(), lr=config.learning_rate)
 
     # NEW - Initialize the LR schedulers - NEW
     cotrainer.init_schedulers(
-        optimizer_rgb,
-        optimizer_fft,
+        optimizer_grayscale,
         step_size=5,
         gamma=0.9
     )
@@ -244,66 +243,67 @@ def run_experiment(config):
         print(f"\nEpoch {epoch + 1}/{config.num_epochs}")
         epoch_counter = epoch + 1
 
-        rgb_loader, fft_loader, unlabeled_loader, val_loader, test_loader = create_loaders(
-            rgb_dataset, fft_dataset, unlabeled_dataset, val_dataset, test_dataset, config.batch_size
+        grayscale_loader, fft_loader, unlabeled_loader, val_loader, test_loader = create_loaders(
+            grayscale_dataset, fft_dataset, unlabeled_dataset, val_dataset, test_dataset, config.batch_size
         )
 
-        print(f"RGB dataset size: {len(rgb_dataset)}, FFT dataset size: {len(fft_dataset)}")
+        print(f"Grayscale dataset size: {len(grayscale_dataset)}, FFT dataset size: {len(fft_dataset)}")
         print(f"Used unlabeled samples: {len(cotrainer.used_unlabeled_indices)}/{len(unlabeled_dataset)}")
 
         reevaluate_flag = (epoch_counter > config.cotraining_start) and (epoch_counter % 4 == 0)
         if reevaluate_flag:
             print("Reevaluation is being performed on this iteration")
 
-        cotrainer.train_iteration(rgb_loader, fft_loader, unlabeled_loader, optimizer_rgb, optimizer_fft,
+        cotrainer.train_iteration(grayscale_loader, fft_loader, unlabeled_loader, optimizer_grayscale, None,
                                   epoch_counter, config.cotraining_batch_size, reevaluate_flag)
 
         # Evaluate on validation set
-        rgb_acc, fft_acc, combined_acc, _, _, _ = cotrainer.evaluate(val_loader)
+        grayscale_acc, fft_acc, combined_acc, _, _, _ = cotrainer.evaluate(val_loader)
 
-        mlflow.log_metric("val_rgb_acc", rgb_acc, step=epoch_counter)
+        mlflow.log_metric("val_grayscale_acc", grayscale_acc, step=epoch_counter)
         mlflow.log_metric("val_fft_acc", fft_acc, step=epoch_counter)
         mlflow.log_metric("val_combined_acc", combined_acc, step=epoch_counter)
         mlflow.log_metric("unlabeled_samples_used", len(cotrainer.used_unlabeled_indices), step=epoch_counter)
 
-        print(f"Validation Accuracy - RGB: {rgb_acc:.4f}, FFT: {fft_acc:.4f}, Combined: {combined_acc:.4f}")
+        print(f"Validation Accuracy - Grayscale: {grayscale_acc:.4f}, FFT: {fft_acc:.4f}, Combined: {combined_acc:.4f}")
 
     # Final evaluation
     print("\nTesting on test set...")
     _, _, _, val_loader, test_loader = create_loaders(
-        rgb_dataset, fft_dataset, unlabeled_dataset, val_dataset, test_dataset, config.batch_size
+        grayscale_dataset, fft_dataset, unlabeled_dataset, val_dataset, test_dataset, config.batch_size
     )
-    rgb_acc, fft_acc, combined_acc, rgb_cm, fft_cm, combined_cm, = cotrainer.evaluate(test_loader)
-    print(f"Test Accuracy - RGB: {rgb_acc:.4f}, FFT: {fft_acc:.4f}, Combined: {combined_acc:.4f}")
+    grayscale_acc, fft_acc, combined_acc, grayscale_cm, fft_cm, combined_cm, = cotrainer.evaluate(test_loader)
+    print(f"Test Accuracy - Grayscale: {grayscale_acc:.4f}, FFT: {fft_acc:.4f}, Combined: {combined_acc:.4f}")
 
     mlflow.log_metrics({
-        "test_rgb_acc": rgb_acc,
+        "test_grayscale_acc": grayscale_acc,
         "test_fft_acc": fft_acc,
         "test_combined_acc": combined_acc
     })
 
     # 4. LOG MODELS AS ARTIFACTS (Directly to MLflow)
-    mlflow.pytorch.log_model(model_rgb, "model_rgb")
-    mlflow.pytorch.log_model(model_fft, "model_fft")
+    mlflow.pytorch.log_model(model_grayscale, "model_grayscale")
 
-    rgb_cm_string = serialize_confusion_matrix(rgb_cm)
+    grayscale_cm_string = serialize_confusion_matrix(grayscale_cm)
     fft_cm_string = serialize_confusion_matrix(fft_cm)
     combined_cm_string = serialize_confusion_matrix(combined_cm)
 
     # Save models
     os.makedirs("../models", exist_ok=True)
-    model_rgb_path = f"models/{config.experiment_id}_rgb2.pth"
-    model_fft_path = f"models/{config.experiment_id}_fft2.pth"
-    torch.save(model_rgb.state_dict(), model_rgb_path)
-    torch.save(model_fft.state_dict(), model_fft_path)
-    print(f"Models saved: {model_rgb_path}, {model_fft_path}")
+    model_grayscale_path = f"models/{config.experiment_id}_grayscale.pth"
+    model_fft_path = f"models/{config.experiment_id}_fft_ensemble"
+    torch.save(model_grayscale.state_dict(), model_grayscale_path)
+    model_fft.save(model_fft_path)
+    mlflow.log_artifact(f"{model_fft_path}.pt")
+    mlflow.log_artifact(f"{model_fft_path}.json")
+    print(f"Models saved: {model_grayscale_path}, {model_fft_path}")
 
     # Print final statistics
     print(f"\nFinal Statistics:")
-    print(f"RGB dataset final size: {len(rgb_dataset)} (original + pseudo-labels)")
+    print(f"Grayscale dataset final size: {len(grayscale_dataset)} (original + pseudo-labels)")
     print(f"FFT dataset final size: {len(fft_dataset)} (original + pseudo-labels)")
     print(f"Total unlabeled samples used: {len(cotrainer.used_unlabeled_indices)}/{len(unlabeled_dataset)}")
-    print(f"RGB pseudo-samples: {len(rgb_dataset.pseudo_samples)}")
+    print(f"Grayscale pseudo-samples: {len(grayscale_dataset.pseudo_samples)}")
     print(f"FFT pseudo-samples: {len(fft_dataset.pseudo_samples)}")
 
     # Return results
@@ -312,19 +312,19 @@ def run_experiment(config):
         "dataset": config.dataset_type,
         "unlabeled_pct": config.unlabeled_pct,
         "cotraining_start": config.cotraining_start,
-        "conf_rgb": config.conf_rgb,
+        "conf_grayscale": config.conf_grayscale,
         "conf_fft": config.conf_fft,
-        "test_rgb_acc": rgb_acc,
+        "test_grayscale_acc": grayscale_acc,
         "test_fft_acc": fft_acc,
         "test_combined_acc": combined_acc,
-        "rgb_confusion_matrix": rgb_cm_string,
+        "grayscale_confusion_matrix": grayscale_cm_string,
         "fft_confusion_matrix": fft_cm_string,
         "combined_confusion_matrix": combined_cm_string,
-        "num_classes": len(rgb_cm),
-        "final_rgb_size": len(rgb_dataset),
+        "num_classes": len(grayscale_cm),
+        "final_grayscale_size": len(grayscale_dataset),
         "final_fft_size": len(fft_dataset),
         "unlabeled_used": len(cotrainer.used_unlabeled_indices),
-        "rgb_pseudo_samples": len(rgb_dataset.pseudo_samples),
+        "grayscale_pseudo_samples": len(grayscale_dataset.pseudo_samples),
         "fft_pseudo_samples": len(fft_dataset.pseudo_samples),
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
@@ -340,11 +340,11 @@ def save_results_to_csv(results_list, filename="small_80_experiment_results.csv"
 
     headers = [
         "experiment_id", "dataset", "unlabeled_pct",
-        "cotraining_start", "conf_rgb", "conf_fft",
-        "test_rgb_acc", "test_fft_acc", "test_combined_acc",
-        "rgb_confusion_matrix", "fft_confusion_matrix", "combined_confusion_matrix",
-        "num_classes", "final_rgb_size", "final_fft_size",
-        "unlabeled_used", "rgb_pseudo_samples", "fft_pseudo_samples", "timestamp"
+        "cotraining_start", "conf_grayscale", "conf_fft",
+        "test_grayscale_acc", "test_fft_acc", "test_combined_acc",
+        "grayscale_confusion_matrix", "fft_confusion_matrix", "combined_confusion_matrix",
+        "num_classes", "final_grayscale_size", "final_fft_size",
+        "unlabeled_used", "grayscale_pseudo_samples", "fft_pseudo_samples", "timestamp"
     ]
 
     with open(filename, 'a', newline='') as csvfile:
@@ -365,9 +365,9 @@ def run_all_experiments():
     # datasets = ["small_80", "organized_50", "large_20"]
     cotraining_starts = [5]  # , 7, 10]
     threshold_configs = [
-        {"rgb": 0.95, "fft": 0.90},  # High thresholds
-        # {"rgb": 0.90, "fft": 0.85},  # Medium thresholds
-        # {"rgb": 0.85, "fft": 0.80}  # Lower thresholds
+        {"grayscale": 0.95, "fft": 0.90},  # High thresholds
+        # {"grayscale": 0.90, "fft": 0.85},  # Medium thresholds
+        # {"grayscale": 0.85, "fft": 0.80}  # Lower thresholds
     ]
 
     all_results = []
@@ -386,7 +386,7 @@ def run_all_experiments():
                     config = ExperimentConfig(
                         dataset_type,
                         cotraining_start,
-                        threshold_config["rgb"],
+                        threshold_config["grayscale"],
                         threshold_config["fft"]
                     )
 
@@ -411,11 +411,11 @@ def run_all_experiments():
     return all_results
 
 
-def run_single_experiment(dataset_type, cotraining_start, conf_rgb, conf_fft):
+def run_single_experiment(dataset_type, cotraining_start, conf_grayscale, conf_fft):
     """
     Run a single experiment with specified parameters
     """
-    config = ExperimentConfig(dataset_type, cotraining_start, conf_rgb, conf_fft)
+    config = ExperimentConfig(dataset_type, cotraining_start, conf_grayscale, conf_fft)
     results = run_experiment(config)
     save_results_to_csv([results])
 
@@ -433,7 +433,7 @@ if __name__ == "__main__":
     # result = run_single_experiment(
     #     dataset_type="small_80",
     #     cotraining_start=5,
-    #     conf_rgb=0.95,
+    #     conf_grayscale=0.95,
     #     conf_fft=0.90
     # )
 
@@ -446,7 +446,7 @@ if __name__ == "__main__":
     #     result = run_single_experiment(
     #         dataset_type="small_80",
     #         cotraining_start=start_epoch,
-    #         conf_rgb=0.95,
+    #         conf_grayscale=0.95,
     #         conf_fft=0.90
     #     )
     #     results.append(result)

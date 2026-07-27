@@ -8,23 +8,25 @@ import torch.fft
 import hashlib
 
 
-def compute_sample_hash(rgb_tensor, fft_tensor, label):
+def compute_sample_hash(grayscale_tensor, fft_tensor, dino_tensor, label):
     """
     Compute a hash value for a sample to detect duplicates
     """
-    rgb_hash = hashlib.md5(rgb_tensor.cpu().numpy().tobytes()).hexdigest()[:8]
+    grayscale_hash = hashlib.md5(grayscale_tensor.cpu().numpy().tobytes()).hexdigest()[:8]
     fft_hash = hashlib.md5(fft_tensor.cpu().numpy().tobytes()).hexdigest()[:8]
-    return f"{rgb_hash}_{fft_hash}_{label}"
+    dino_hash = hashlib.md5(dino_tensor.cpu().numpy().tobytes()).hexdigest()[:8]
+    return f"{grayscale_hash}_{fft_hash}_{dino_hash}_{label}"
 
 
 class RGBWithFFTDataset(Dataset):
     """
-    Dataset that loads RGB images and computes FFT
+    Dataset that creates grayscale, FFT, and DINOv2 inputs from source images.
     """
-    def __init__(self, root_dir, rgb_transform=None, fft_transform=None, labeled=True):
+    def __init__(self, root_dir, grayscale_transform=None, fft_transform=None, dino_transform=None, labeled=True):
         self.root_dir = root_dir
-        self.rgb_transform = rgb_transform
+        self.grayscale_transform = grayscale_transform
         self.fft_transform = fft_transform
+        self.dino_transform = dino_transform
         self.labeled = labeled
         self.classes = sorted(os.listdir(root_dir)) if labeled and os.path.isdir(root_dir) else None
         self.class_to_idx = {cls_name: i for i, cls_name in enumerate(self.classes)} if self.classes else None
@@ -56,14 +58,14 @@ class RGBWithFFTDataset(Dataset):
     def add_pseudo_samples(self, pseudo_samples):
         """
         Add pseudo-labeled samples to the dataset, avoiding duplicates.
-        Each pseudo-sample is a tuple: (rgb_tensor, fft_tensor, label)
+        Each pseudo-sample is a tuple: (grayscale_tensor, fft_tensor, dino_tensor, label)
         """
         added_count = 0
-        for rgb_tensor, fft_tensor, label in pseudo_samples:
-            sample_hash = compute_sample_hash(rgb_tensor, fft_tensor, label)
+        for grayscale_tensor, fft_tensor, dino_tensor, label in pseudo_samples:
+            sample_hash = compute_sample_hash(grayscale_tensor, fft_tensor, dino_tensor, label)
             if sample_hash not in self.pseudo_sample_hashes:
                 self.pseudo_sample_hashes.add(sample_hash)
-                self.pseudo_samples.append((rgb_tensor, fft_tensor, label))
+                self.pseudo_samples.append((grayscale_tensor, fft_tensor, dino_tensor, label))
                 added_count += 1
 
         return added_count
@@ -78,8 +80,8 @@ class RGBWithFFTDataset(Dataset):
 
         # Build set of hashes to remove
         hashes_to_remove = set()
-        for rgb_tensor, fft_tensor, label in pseudo_samples:
-            sample_hash = compute_sample_hash(rgb_tensor, fft_tensor, label)
+        for grayscale_tensor, fft_tensor, dino_tensor, label in pseudo_samples:
+            sample_hash = compute_sample_hash(grayscale_tensor, fft_tensor, dino_tensor, label)
             if sample_hash in self.pseudo_sample_hashes:
                 hashes_to_remove.add(sample_hash)
                 removed_count += 1
@@ -90,10 +92,10 @@ class RGBWithFFTDataset(Dataset):
         # Filter pseudo_samples list
         self.pseudo_samples = [
             sample for sample in self.pseudo_samples
-            if compute_sample_hash(sample[0], sample[1], sample[2]) not in hashes_to_remove
+            if compute_sample_hash(sample[0], sample[1], sample[2], sample[3]) not in hashes_to_remove
         ]
-
         return removed_count
+
     def __len__(self):
         """
         Determines the length of the whole dataset, including labeled/pseudo-labeled samples.
@@ -116,22 +118,20 @@ class RGBWithFFTDataset(Dataset):
         else:
             # This is a pseudo-sample (stored as tensors)
             pseudo_idx = idx - len(self.samples)
-            rgb_tensor, fft_tensor, label = self.pseudo_samples[pseudo_idx]
-            return rgb_tensor, fft_tensor, label
+            grayscale_tensor, fft_tensor, dino_tensor, label = self.pseudo_samples[pseudo_idx]
+            return grayscale_tensor, fft_tensor, dino_tensor, label
 
-        # Apply RGB transforms
-        rgb_image = self.rgb_transform(image) if self.rgb_transform else transforms.ToTensor()(image)
+        grayscale_image = self.grayscale_transform(image) if self.grayscale_transform else transforms.ToTensor()(image)
 
         # Compute FFT
         gray_image = transforms.Grayscale()(image)
         gray_tensor = transforms.ToTensor()(gray_image) if not isinstance(gray_image, torch.Tensor) else gray_image
 
-        # Get the complex FFT and shift low frequencies to center
-        f_complex = torch.fft.fft2(gray_tensor.squeeze())
-        f_shifted = torch.fft.fftshift(f_complex)
+        # Get the complex FFT
+        f_complex = torch.fft.fft(gray_tensor.squeeze())
 
-        # Calculate Magnitude and apply Log-Scale (The "Magic" Step)
-        fft_magnitude = torch.abs(f_shifted)
+        # Calculate Magnitude and apply Log-Scale
+        fft_magnitude = torch.abs(f_complex)
         fft_log = torch.log1p(fft_magnitude)
 
         # Min-Max Normalization to [0, 1]
@@ -142,9 +142,11 @@ class RGBWithFFTDataset(Dataset):
         fft_normalized = (fft_log - fft_min) / (fft_max - fft_min + eps)
 
         # Final Formatting
-        fft_image = fft_normalized.unsqueeze(0).float()
+        fft_vector = fft_normalized.unsqueeze(0).float()
 
         if self.fft_transform:
-            fft_image = self.fft_transform(fft_image)
+            fft_vector = self.fft_transform(fft_vector)
 
-        return rgb_image, fft_image, label
+        dino_image = self.dino_transform(image) if self.dino_transform else transforms.ToTensor()(image)
+
+        return grayscale_image, fft_vector, dino_image, label

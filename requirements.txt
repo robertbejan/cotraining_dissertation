@@ -1,0 +1,7 @@
+torch
+torchvision
+xgboost
+scikit-learn
+numpy
+pillow
+mlflow
