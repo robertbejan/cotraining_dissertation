@@ -9,11 +9,11 @@ from torch.optim.lr_scheduler import StepLR
 class BlumMitchellCoTraining:
     """Co-training controller for a grayscale CNN and a DINOv2/FFT ensemble."""
 
-    def __init__(self, model_grayscale, model_fft, num_classes, device, checked_number, cotraining_start, k=30,
+    def __init__(self, model_grayscale, model_ensemble, num_classes, device, checked_number, cotraining_start, k=30,
                  confidence_thresh_fft=0.95, confidence_thresh_grayscale=0.9):
         self.scheduler_grayscale = None
         self.model_grayscale = model_grayscale
-        self.model_fft = model_fft
+        self.model_ensemble = model_ensemble
         self.num_classes = num_classes
         self.device = device
         self.checked_number = checked_number
@@ -22,7 +22,7 @@ class BlumMitchellCoTraining:
         self.confidence_thresh_grayscale = confidence_thresh_grayscale
         self.criterion = nn.CrossEntropyLoss()
         self.cotraining_start = cotraining_start
-        self.random_dropout = True
+        self.random_dropout = False
         self.grayscale_dataset = None
         self.fft_dataset = None
         self.unlabeled_dataset = None
@@ -87,12 +87,12 @@ class BlumMitchellCoTraining:
 
             # Put all losses in a list
             losses.append(loss.item())
-        self.model_fft.fit_loader(grayscale_loader)
+        # self.model_ensemble.fit_loader(grayscale_loader)
         print(f"The average Grayscale loss on this epoch is: {sum(losses) / len(losses):.4f}")
 
     def label_unlabeled_data(self, unlabeled_loader):
         self.model_grayscale.eval()
-        self.model_fft.eval()
+        self.model_ensemble.eval()
         candidates = []
         current_idx = 0
         with torch.no_grad():
@@ -103,7 +103,7 @@ class BlumMitchellCoTraining:
                 grayscale_preds = self.model_grayscale(grayscale_inputs)
                 grayscale_probs = torch.softmax(grayscale_preds, dim=1)
                 # Compute probabilities for the ensemble model
-                fft_probs = self.model_fft.predict_proba(dino_inputs, fft_inputs)
+                fft_probs = self.model_ensemble.predict_proba(dino_inputs, fft_inputs)
                 # Get the most trusted annotations
                 grayscale_confidences, grayscale_predictions = torch.max(grayscale_probs, dim=1)
                 fft_confidences, fft_predictions = torch.max(fft_probs, dim=1)
@@ -139,14 +139,14 @@ class BlumMitchellCoTraining:
             to_remove = [pseudo_samples[index] for index in indices]
         else:
             self.model_grayscale.eval()
-            self.model_fft.eval()
+            self.model_ensemble.eval()
             to_remove = []
             with torch.no_grad():
                 for index in indices:
                     # Exctract the tensors from the pseudo-labeled sample and compute the probs
                     grayscale_tensor, fft_tensor, dino_tensor, pseudo_label = pseudo_samples[index]
                     grayscale_probs = torch.softmax(self.model_grayscale(grayscale_tensor.unsqueeze(0).to(self.device)), dim=1)
-                    fft_probs = self.model_fft.predict_proba(dino_tensor.unsqueeze(0), fft_tensor.unsqueeze(0))
+                    fft_probs = self.model_ensemble.predict_proba(dino_tensor.unsqueeze(0), fft_tensor.unsqueeze(0))
                     # Get the max confidence samples
                     grayscale_conf, grayscale_prediction = torch.max(grayscale_probs, dim=1)
                     fft_conf, fft_prediction = torch.max(fft_probs, dim=1)
@@ -191,13 +191,13 @@ class BlumMitchellCoTraining:
 
     def evaluate(self, loader):
         self.model_grayscale.eval()
-        self.model_fft.eval()
+        self.model_ensemble.eval()
         labels_all, grayscale_all, fft_all, combined_all = [], [], [], []
         with torch.no_grad():
             for grayscale_inputs, fft_inputs, dino_inputs, labels in loader:
                 grayscale_inputs = grayscale_inputs.to(self.device)
                 grayscale_outputs = self.model_grayscale(grayscale_inputs)
-                fft_probs = self.model_fft.predict_proba(dino_inputs, fft_inputs)
+                fft_probs = self.model_ensemble.predict_proba(dino_inputs, fft_inputs)
                 combined_probs = (torch.softmax(grayscale_outputs, dim=1) + fft_probs) / 2
                 labels_all.extend(labels.numpy())
                 grayscale_all.extend(torch.argmax(grayscale_outputs, dim=1).cpu().numpy())

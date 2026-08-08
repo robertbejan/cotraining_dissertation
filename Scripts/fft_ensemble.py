@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from xgboost import XGBClassifier
+from sklearn.metrics import accuracy_score, r2_score
 
 
 class Autoencoder(nn.Module):
@@ -106,7 +107,8 @@ class FFTEnsembleModel:
         optimizer = torch.optim.Adam(self.autoencoder.parameters(), lr=1e-3)
         criterion = nn.MSELoss()
         self.autoencoder.train()
-        for _ in range(self.autoencoder_epochs):
+        for epoch in range(self.autoencoder_epochs):
+            total_loss = 0.0
             for (batch_features,) in reconstruction_loader:
                 batch_features = batch_features.to(self.device)
                 reconstruction, _ = self.autoencoder(batch_features)
@@ -114,10 +116,20 @@ class FFTEnsembleModel:
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+                total_loss += loss.item() * batch_features.size(0)
+
+            epoch_loss = total_loss / len(reconstruction_loader.dataset)
+            print(f"Epoch [{epoch + 1}/{self.autoencoder_epochs}] - Loss: {epoch_loss:.6f}")
 
         self.autoencoder.eval()
         with torch.no_grad():
-            latent_features = self.autoencoder.encode(features.to(self.device)).cpu().numpy()
+            features_device = features.to(self.device)
+            latent_features = self.autoencoder.encode(features_device).cpu().numpy()
+            
+            # Autoencoder Reconstruction Accuracy (R^2 Score)
+            reconstructed, _ = self.autoencoder(features_device)
+            ae_r2 = r2_score(features.numpy(), reconstructed.cpu().numpy())
+            print(f"Autoencoder Reconstruction R^2 Score: {ae_r2 * 100:.2f}%")
 
         classifier_params = {
             "objective": "multi:softprob",
@@ -129,10 +141,27 @@ class FFTEnsembleModel:
             "colsample_bytree": 0.8,
             "tree_method": "hist",
             "random_state": 42,
+            "eval_metric": ["mlogloss", "merror"],
         }
         classifier_params.update(self.xgboost_params)
         self.classifier = XGBClassifier(**classifier_params)
-        self.classifier.fit(latent_features, labels.numpy())
+        
+        # Request both logloss and classification error during fit
+        self.classifier.fit(
+            latent_features, 
+            labels.numpy(),
+            eval_set=[(latent_features, labels.numpy())],
+            verbose=False
+        )
+
+        # Retrieve XGBoost metrics
+        results = self.classifier.evals_result()
+        mlogloss = results['validation_0']['mlogloss'][-1]
+        merror = results['validation_0']['merror'][-1]
+        train_acc = (1.0 - merror) * 100
+
+        print(f"XGBoost Final Training Loss (mlogloss): {mlogloss:.6f}")
+        print(f"XGBoost Final Training Accuracy: {train_acc:.2f}%")
 
     def predict_proba(self, dino_images, fft_vectors):
         if self.autoencoder is None or self.classifier is None:

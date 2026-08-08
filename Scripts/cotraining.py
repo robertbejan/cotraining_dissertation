@@ -11,10 +11,10 @@ import torch.fft
 import mlflow
 import mlflow.pytorch
 
-from Scripts.RGBWithFFTDataset import RGBWithFFTDataset
-from Scripts.BlumMitchellCoTraining import BlumMitchellCoTraining
-from Scripts.helper_functions import serialize_confusion_matrix
-from Scripts.fft_ensemble import FFTEnsembleModel
+from RGBWithFFTDataset import RGBWithFFTDataset
+from BlumMitchellCoTraining import BlumMitchellCoTraining
+from helper_functions import serialize_confusion_matrix
+from fft_ensemble import FFTEnsembleModel
 
 """                                                           Questions:
 - 
@@ -91,7 +91,7 @@ class ExperimentConfig:
             # }
         }
 
-        base_path = "D:/Facultate/Disertatie/mainProject/pythonProject1"
+        base_path = "/home/robertbejan/Documents/Repositories/cotraining_dissertation"
         dataset_info = dataset_map[dataset_type]
 
         self.labeled_path = os.path.join(base_path, dataset_info["base"], "labeled_train")
@@ -103,7 +103,7 @@ class ExperimentConfig:
         self.experiment_id = f"{dataset_type}_start{cotraining_start}_grayscale{conf_grayscale}_fft{conf_fft}"
 
 
-def initialize_grayscale_model(num_classes, device):
+def initialize_ensemble_model(num_classes, device):
     """
     This function initializes the Grayscale SqueezeNet backbone with ImageNet weights.
     :param num_classes: The number of classes
@@ -121,7 +121,7 @@ def initialize_grayscale_model(num_classes, device):
     return model_grayscale
 
 
-def initialize_fft_model(num_classes, device):
+def initialize_fftdino_model(num_classes, device):
     """
     Initialize the DINOv2, FFT autoencoder, and XGBoost branch.
     :param num_classes: The number of classes
@@ -190,9 +190,8 @@ def run_experiment(config):
 
     dino_transform = transforms.Compose([
         transforms.Resize((224, 224)),
-        transforms.Grayscale(num_output_channels=1),
         transforms.ToTensor(),
-        transforms.Normalize([0.485], [0.229])
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
     fft_transform = transforms.Compose([
@@ -214,12 +213,12 @@ def run_experiment(config):
     num_classes = len(grayscale_dataset.classes)
     print(f"Number of classes: {num_classes}")
 
-    model_grayscale = initialize_grayscale_model(num_classes, device)
-    model_fft = initialize_fft_model(num_classes, device)
+    model_grayscale = initialize_ensemble_model(num_classes, device)
+    model_ensemble = initialize_fftdino_model(num_classes, device)
 
     # Co-training setup
     cotrainer = BlumMitchellCoTraining(
-        model_grayscale, model_fft, num_classes, device,
+        model_grayscale, model_ensemble, num_classes, device,
         cotraining_start=config.cotraining_start,
         k=config.k,
         confidence_thresh_fft=config.conf_fft,
@@ -246,6 +245,10 @@ def run_experiment(config):
         grayscale_loader, fft_loader, unlabeled_loader, val_loader, test_loader = create_loaders(
             grayscale_dataset, fft_dataset, unlabeled_dataset, val_dataset, test_dataset, config.batch_size
         )
+
+        # Training the ensemble model one time with only labeled data before co-training
+        if epoch_counter == 1:
+            self.model_ensemble.fit_loader(grayscale_loader)
 
         print(f"Grayscale dataset size: {len(grayscale_dataset)}, FFT dataset size: {len(fft_dataset)}")
         print(f"Used unlabeled samples: {len(cotrainer.used_unlabeled_indices)}/{len(unlabeled_dataset)}")
@@ -291,12 +294,12 @@ def run_experiment(config):
     # Save models
     os.makedirs("../models", exist_ok=True)
     model_grayscale_path = f"models/{config.experiment_id}_grayscale.pth"
-    model_fft_path = f"models/{config.experiment_id}_fft_ensemble"
+    model_ensemble_path = f"models/{config.experiment_id}_fftdino_ensemble"
     torch.save(model_grayscale.state_dict(), model_grayscale_path)
-    model_fft.save(model_fft_path)
-    mlflow.log_artifact(f"{model_fft_path}.pt")
-    mlflow.log_artifact(f"{model_fft_path}.json")
-    print(f"Models saved: {model_grayscale_path}, {model_fft_path}")
+    model_ensemble.save(model_ensemble_path)
+    mlflow.log_artifact(f"{model_ensemble_path}.pt")
+    mlflow.log_artifact(f"{model_ensemble_path}.json")
+    print(f"Models saved: {model_grayscale_path}, {model_ensemble_path}")
 
     # Print final statistics
     print(f"\nFinal Statistics:")

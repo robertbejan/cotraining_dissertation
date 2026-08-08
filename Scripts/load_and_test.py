@@ -58,7 +58,7 @@ model_rgb = model_rgb.to(device)
 # FFT model
 model_fft = models.squeezenet1_1(weights=SqueezeNet1_1_Weights.IMAGENET1K_V1)
 new_layer = nn.Conv2d(1, 64, kernel_size=3, stride=2)
-pretrained_weights = model_fft.features[0].weight.data
+pretrained_weights = model_ensembledino.features[0].weight.data
 new_layer.weight.data = pretrained_weights.mean(dim=1, keepdim=True)
 model_fft.features[0] = new_layer
 model_fft.classifier[1] = nn.Conv2d(model_fft.classifier[1].in_channels, num_classes, kernel_size=1)
